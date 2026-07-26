@@ -6,11 +6,13 @@
 #include <memory>
 #include <glad/glad.h>
 #include <cassert>
+#include <openglBasics/shaderclass.h>
+#include <openglBasics/VAO.h>
+#include <openglBasics/VBO.h>
+#include <openglBasics/EBO.h>
 
 constexpr float F_UNSET = -1.0f;
-constexpr float I_UNSET = I_UNSET;
-
-class UIManager;
+constexpr float I_UNSET = -1;
 
 struct Vertex
 {
@@ -97,14 +99,17 @@ struct ConstraintStoreState{
     float prefferedHeightPercent = F_UNSET;
 };
 
-// struct ColorStoreState{
-//     float r,g,b,a;
-// };
-
 struct UIStateTables {
     std::vector<GeometryStoreState> geometry;
     std::vector<ConstraintStoreState> constraints;
     std::vector<Color> colors;
+};
+
+struct RenderData
+{
+    const std::vector<Vertex>& vertices;
+    const std::vector<GLuint>& indices;
+    const std::vector<DrawCommand>& commands;
 };
 
 //ui element dosent know who it is without a manager
@@ -137,12 +142,7 @@ public:
     virtual void UpdateLayout(UIStateTables& data);
 };
 
-//it's already a god class...
-//renderer, ui layout manager
-//"lifetime" manager
-//hirearchy manager
-//gonna fix this mess soon
-class UIManager {
+class UIScene {
 private:
     std::vector<std::unique_ptr<UIElement>> ptrStore;
     std::vector<int> drawOrder;
@@ -151,27 +151,31 @@ private:
     UIStateTables dataTables;
 
     bool hirearchyDirty = true;
-    int rootId;
+    bool frameDataRebuild = true;
+    int rootId = I_UNSET;
 
     void MarkParentChainDirty(int startingId);
     void CompileDisplayList(int elementId);
 
-public:
     std::vector<Vertex> globalVertices;
     std::vector<GLuint> globalIndices;
     std::vector<DrawCommand> drawCommands;
 
-    int defaultCapacity = 100;
+public:
+    int defaultCapacity = 100; //for ptrStore
+
+    float viewportWidth = F_UNSET;
+    float viewportHeight = F_UNSET;
 
     void Init();
-    void UpdateptrStore();
     void SetRoot(int id);
     void EditElementShape(int id, const GeometryStoreState& props, bool dirtyChain);
     void EditElementColor(int id, const Color& props, bool dirtyChain);
-    void SyncElementToCache(int id);
     void StepFrame(std::array<float, 2>& resolution);//first element will always be the root make it the size of resolution
     void AddChild(int parentId, int childId);
+    void RemoveChild(int childId);
     void RebuildHierarchy();
+    void SetRootViewport(float width, float height);
 
     UIElement* GetElement(int id) const;
     const GeometryStoreState& GetElementShape(int id) const;
@@ -226,6 +230,33 @@ public:
     }
 };
 
+class Hierarchy{
+private:
+public:
+    bool hirearchyDirty = true;
+};
+
+class LayoutEngine{
+
+};
+
+class RenderBatcher{
+
+};
+
+class Renderer{
+private:
+    VAO FrameVAO;
+    VBO FrameVBO;
+    EBO FrameEBO;
+    Shader DefaultShader;
+    GLint resolutionUniform = I_UNSET;
+public:
+    void Init();
+    // void UploadData();
+    void DrawFrame(const RenderData);
+};
+
 class AnchorElement : public UIElement {
 public:
     GeometryView Draw(const UIStateTables& data) override;
@@ -238,7 +269,7 @@ class PaddedElement : public UIElement {
 
 class UIRect : public PaddedElement {
 public:
-    // GeometryView Draw(const UIManager& manager) override;
+    // GeometryView Draw(const UIScene& manager) override;
 };
 
 class VerticalContainer : public PaddedElement {
@@ -246,7 +277,7 @@ public:
     bool centerHorizontally = true;
     bool resizeChildren = false;
     float r = 0.6f, g = 0.1f, b = 0.8f;
-    // GeometryView Draw(const UIManager& manager) override;
+    // GeometryView Draw(const UIScene& manager) override;
     void UpdateLayout(UIStateTables& data) override;
 };
 

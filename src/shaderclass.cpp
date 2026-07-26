@@ -17,7 +17,7 @@ std::string get_shader_file_contents(const char* filename)
     throw(errno);
 }
 
-Shader::Shader(const char* vertexFile, const char* fragmentFile)
+void Shader::Load(const char* vertexFile, const char* fragmentFile)
 {
     std::string vertexCode = get_shader_file_contents(vertexFile);
     std::string fragmentCode = get_shader_file_contents(fragmentFile);

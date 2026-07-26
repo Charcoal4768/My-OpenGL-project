@@ -3,10 +3,6 @@
 #include <iostream>
 #include <stdio.h>
 #include <cmath>
-#include <openglBasics/shaderclass.h>
-#include <openglBasics/VAO.h>
-#include <openglBasics/VBO.h>
-#include <openglBasics/EBO.h>
 #include <UI/UIElements.h>
 
 //this file is used purely as a showcase for the framework

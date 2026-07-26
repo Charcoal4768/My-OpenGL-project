@@ -3,6 +3,24 @@
 #include <algorithm>
 #include <iostream>
 
+void UIScene::SetRootViewport(float width, float height){
+    viewportWidth = width;
+    viewportHeight = height;
+//we just store the new size data
+//we let StepFrame handle the checks
+//and comparisons and setting bools and stuff
+//this old stuff:
+// if (!ptrStore.empty() && ptrStore[rootId]) { //sync UI root to window size
+//     GeometryStoreState& rootShape = dataTables.geometry[rootId];
+//     if (rootShape.width != newWidth || rootShape.height != newHeight) {
+//         rootShape.width = newWidth;
+//         rootShape.height = newHeight;
+//         ptrStore[rootId]->isDirty = true; 
+//         frameDataRebuild = true;
+//     }
+// }
+}
+
 std::array<float,2> ApplyConstraints(float computedWidth, float computedHeight, 
 float parentWidth, float parentHeight, const ConstraintStoreState& constraints){
     //we want final size to be basically css clamp() type stuff
@@ -30,6 +48,34 @@ float parentWidth, float parentHeight, const ConstraintStoreState& constraints){
     return {finalWidth, finalHeight};
 }
 
+bool LayoutPass(const std::vector<int>& drawOrder){
+    for (int elementId : drawOrder) { //use drawOrder made by traversal pass
+        if (!ptrStore[elementId]) continue;
+        float parentAbsX = 0.0f;
+        float parentAbsY = 0.0f;
+        int pId = ptrStore[elementId]->parentId;
+        GeometryStoreState& elementShape = dataTables.geometry[elementId];
+        //{ compute absolute pos
+        if (pId != -1) {
+            GeometryStoreState& parentShape = dataTables.geometry[pId];
+            parentAbsX = parentShape.absoluteX;
+            parentAbsY = parentShape.absoluteY;
+        }
+        //}
+        elementShape.absoluteX = elementShape.localX + parentAbsX;
+        elementShape.absoluteY = elementShape.localY + parentAbsY;
+        if (ptrStore[elementId]->isDirty) { //actual layout update
+            ptrStore[elementId]->UpdateLayout(dataTables);
+            frameDataRebuild = true; //flag to say rebuild frame
+            // we will make this function
+            //a bool and based on its output, StepFrame will
+            //set frameDataRebuild
+            return true;
+        }
+        return false;
+    }
+}
+
 ScissorRect IntersectRects(const ScissorRect& a, const ScissorRect& b){
     GLint x1 = std::max(a.x, b.x);
     GLint y1 = std::max(a.y, b.y);
@@ -42,14 +88,14 @@ ScissorRect IntersectRects(const ScissorRect& a, const ScissorRect& b){
     return {x1, y1, x2 - x1, y2 - y1};
 }
 
-void UIManager::SetRoot(int id){
+void UIScene::SetRoot(int id){
     UIElement* ptr = ptrStore[id].get();
     assert(ptr != nullptr);//checks if AddElement was even called for this, if it was then id automatically is valid and > -1
     assert(ptr->parentId == -1); //root cannot have a parent
     rootId = id;
 }
 
-void UIManager::EditElementShape(int id, const GeometryStoreState& newShape, bool dirtyChain){
+void UIScene::EditElementShape(int id, const GeometryStoreState& newShape, bool dirtyChain){
     assert(id >= 0);
     assert(id < ptrStore.size());
     assert(ptrStore[id] != nullptr);
@@ -75,7 +121,7 @@ void UIManager::EditElementShape(int id, const GeometryStoreState& newShape, boo
     }
 }
 
-void UIManager::EditElementColor(int id, const Color& newColor, bool dirtyChain){
+void UIScene::EditElementColor(int id, const Color& newColor, bool dirtyChain){
     assert(id >= 0);
     assert(id < ptrStore.size());
     assert(ptrStore[id] != nullptr);
@@ -98,7 +144,7 @@ void UIManager::EditElementColor(int id, const Color& newColor, bool dirtyChain)
     }
 }
 
-const GeometryStoreState& UIManager::GetElementShape(int id) const
+const GeometryStoreState& UIScene::GetElementShape(int id) const
 {
     assert(id >= 0);
     assert(id < dataTables.geometry.size());
@@ -106,28 +152,24 @@ const GeometryStoreState& UIManager::GetElementShape(int id) const
     return dataTables.geometry[id];
 }
 
-const ConstraintStoreState& UIManager::GetElementConstraints(int id) const{
+const ConstraintStoreState& UIScene::GetElementConstraints(int id) const{
     assert(id >= 0);
     assert(id < dataTables.constraints.size());
 
     return dataTables.constraints[id];
 }
 
-const Color& UIManager::GetElementColor(int id) const {
+const Color& UIScene::GetElementColor(int id) const {
     assert(id >= 0);
     assert(id < dataTables.colors.size());
 
     return dataTables.colors[id];
 }
 
-void UIManager::RebuildHierarchy(){
+void UIScene::RebuildHierarchy(){
     if (!hirearchyDirty) return;
 
     displayList.clear();
-
-    // this old method used to search its own data to find the root
-    // that felt kinda wrong so i think any dev using the framework should
-    // be setting the root with a SetRoot function
 
     if (!ptrStore.empty() && ptrStore[rootId]){
         drawOrder.clear();
@@ -135,11 +177,10 @@ void UIManager::RebuildHierarchy(){
         CompileDisplayList(rootId);
     }
 
-    hirearchyDirty = false;
-    
+    hirearchyDirty = false;   
 }
 
-void UIManager::CompileDisplayList(int elementId){
+void UIScene::CompileDisplayList(int elementId){
     UIElement* el = ptrStore[elementId].get();
 
     if (!el) return;
@@ -161,10 +202,9 @@ void UIManager::CompileDisplayList(int elementId){
         displayList.push_back({RenderOpType::PopScissor, elementId});
     }
     
-    
 }
 
-void UIManager::AddChild(int parentId, int childId) {
+void UIScene::AddChild(int parentId, int childId) {
     if (parentId < 0 || parentId >= ptrStore.size() || !ptrStore[parentId]) return;
     if (childId < 0 || childId >= ptrStore.size() || !ptrStore[childId]) return;
 
@@ -174,77 +214,77 @@ void UIManager::AddChild(int parentId, int childId) {
     parent->childIds.push_back(child->id);
     child->parentId = parent->id;
     parent->isDirty = true;
+    hirearchyDirty = true; //gonna make this something that takes
+    //element ID which triggered rebuild
+    //into account
+}
+
+void UIScene::RemoveChild(int childId) {
+    if (childId < 0 || childId >= ptrStore.size() || !ptrStore[childId]) return;
+    UIElement* child = ptrStore[childId].get();
+    int parentId = child->parentId;
+    if (parentId < 0 || parentId >= ptrStore.size() || !ptrStore[parentId]) return;
+    UIElement* parent = ptrStore[childId].get();
+    std::vector<int>& childIds = parent->childIds;
+    auto it = std::find(childIds.begin(), childIds.end(), childId);
+
+    if (it != childIds.end()){
+        int index = it - childIds.begin();
+        std::swap(childIds[index], childIds.back());
+        childIds.pop_back();
+    }
+    hirearchyDirty = true;
 }
 
 void UIElement::UpdateLayout(UIStateTables& data) {
     isDirty = false;
 }
 
-ScreenLayoutMode UIManager::GetScreenLayoutMode() const{
+ScreenLayoutMode UIScene::GetScreenLayoutMode() const{
     if (dataTables.geometry[rootId].width < 600.0f) return ScreenLayoutMode::Mobile;
     return ScreenLayoutMode::Desktop;
 }
 
-void UIManager::StepFrame(std::array<float,2>& resolution){
+void UIScene::StepFrame(std::array<float,2>& resolution){
 
     if (hirearchyDirty) {
-        RebuildHierarchy();
+        RebuildHierarchy(); //update treversal
     }
 
-    bool geometryNeedsRebuild = false;
+    bool frameDataRebuild = false;
 
-    if (!ptrStore.empty() && ptrStore[rootId]) {
-        float newWidth  = resolution[0];
-        float newHeight = resolution[1];
-        GeometryStoreState& rootShape = dataTables.geometry[rootId];
+    // if (!ptrStore.empty() && ptrStore[rootId]) { //sync UI root to window size
+    //     float newWidth  = resolution[0];
+    //     float newHeight = resolution[1];
+    //     GeometryStoreState& rootShape = dataTables.geometry[rootId];
 
-        if (rootShape.width != newWidth || rootShape.height != newHeight) {
-            rootShape.width = newWidth;
-            rootShape.height = newHeight;
-            ptrStore[rootId]->isDirty = true; 
-            geometryNeedsRebuild = true;
-        }
+    //     if (rootShape.width != newWidth || rootShape.height != newHeight) {
+    //         rootShape.width = newWidth;
+    //         rootShape.height = newHeight;
+    //         ptrStore[rootId]->isDirty = true; 
+    //         frameDataRebuild = true;
+    //     }
+    // }
+
+    size_t elementCount = drawOrder.size(); //need to fetch this from traversal
+    //need to fetch displayList too
+
+    if (elementCount > 0){//layout pass
+        //layout stuff will happen here
     }
 
-    size_t elementCount = drawOrder.size();
-
-    if (elementCount > 0){
-        for (int elementId : drawOrder) {
-            if (!ptrStore[elementId]) continue;
-
-            float parentAbsX = 0.0f;
-            float parentAbsY = 0.0f;
-            int pId = ptrStore[elementId]->parentId;
-            GeometryStoreState& parentShape = dataTables.geometry[pId];
-            GeometryStoreState& elementShape = dataTables.geometry[elementId];
-
-            if (pId != -1) {
-                parentAbsX = parentShape.absoluteX;
-                parentAbsY = parentShape.absoluteY;
-            }
-
-            elementShape.absoluteX = elementShape.localX + parentAbsX;
-            elementShape.absoluteY = elementShape.localY + parentAbsY;
-
-            if (ptrStore[elementId]->isDirty) {
-                ptrStore[elementId]->UpdateLayout(dataTables);
-                geometryNeedsRebuild = true;
-            }
-        }
-    }
-
-    if (geometryNeedsRebuild) {
+    if (frameDataRebuild) { //renderBatcher == this block
         globalVertices.clear();
-        globalIndices.clear();
+        globalIndices.clear(); //reset all buffers
         drawCommands.clear();
 
         DrawCommand currentBatch;
-        currentBatch.indexOffset = 0;
+        currentBatch.indexOffset = 0; //we make a new batch
         currentBatch.indexCount = 0;
 
         std::vector<ScissorRect> scissorRects;
 
-        for (const RenderOp& op : displayList){
+        for (const RenderOp& op : displayList){ //unpack the displayList
             if (op.type == RenderOpType::PushScissor){
                 if (currentBatch.indexCount > 0){
                     drawCommands.push_back(currentBatch);
@@ -295,15 +335,16 @@ void UIManager::StepFrame(std::array<float,2>& resolution){
             else if (op.type == RenderOpType::DrawElement){
                 UIElement* element = ptrStore[op.elementId].get();
                 if (element){
-                    GeometryView view = element->Draw(dataTables);
+                    GeometryView view = element->Draw(dataTables);//get element geometry
                     GLuint baseVertexOffset = static_cast<GLuint>(globalVertices.size());
-
+                    
+                    //put geometry into appropriate group
                     globalVertices.insert(globalVertices.end(), view.verticesPtr, view.verticesPtr + view.vertexCount);
 
                     for (size_t i = 0; i < view.indexCount; i++) {
                         globalIndices.push_back(baseVertexOffset + view.indicesPtr[i]);
                     }
-                    currentBatch.indexCount += view.indexCount;
+                    currentBatch.indexCount += view.indexCount;//batch book-keep
                 }
             }
         }
@@ -358,7 +399,7 @@ void VerticalContainer::UpdateLayout(UIStateTables& data){
     if (fitContentWidth){
         float fitWidth = childLargestWidth + 2 * padding;
         myData.width = std::max(myData.width, fitWidth);
-        uIManager->EditElement(this->id, myData, false);
+        UIScene->EditElement(this->id, myData, false);
     }
 
     for (int childId : childIds){
@@ -372,15 +413,19 @@ void VerticalContainer::UpdateLayout(UIStateTables& data){
         childData.x = targetX;
         childData.y = targetY;
 
-        uIManager->EditElement(childId, childData, false);
+        UIScene->EditElement(childId, childData, false);
 
         targetY += padding + childData.height;
     }
 
     if (fitContentHeight){
         myData.height = targetY;
-        uIManager->EditElement(this->id, myData, false);
+        UIScene->EditElement(this->id, myData, false);
     }
     
     isDirty = false;
 }
+//goal: split UI manager
+//give UpdateLayout access to *LayoutManager instead of
+//the entire UIScene
+//
