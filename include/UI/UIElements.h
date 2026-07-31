@@ -11,8 +11,11 @@
 #include <openglBasics/VBO.h>
 #include <openglBasics/EBO.h>
 
+//DOES NOT WORK RN, MASSIVE REFACTOR CURRENTLY HAPPENING
+
 constexpr float F_UNSET = -1.0f;
-constexpr float I_UNSET = -1;
+constexpr int I_UNSET = -1;
+typedef std::vector<std::unique_ptr<UIElement>> pointerVector;
 
 struct Vertex
 {
@@ -67,6 +70,27 @@ struct RenderOp {
     int elementId;
 };
 
+struct RenderData
+{
+    const std::vector<Vertex>& vertices;
+    const std::vector<GLuint>& indices;
+    const std::vector<DrawCommand>& commands;
+};
+
+struct TraversalData
+{
+    std::vector<int> drawOrder;
+    std::vector<RenderOp> displayList;
+    std::vector<int> parentIdLookup;
+    bool empty() const{
+        return (
+            drawOrder.empty() ||
+            displayList.empty() ||
+            parentIdLookup.empty()
+        );
+    }
+};
+
 struct GeometryView {
     const Vertex* verticesPtr;
     size_t vertexCount;
@@ -105,13 +129,6 @@ struct UIStateTables {
     std::vector<Color> colors;
 };
 
-struct RenderData
-{
-    const std::vector<Vertex>& vertices;
-    const std::vector<GLuint>& indices;
-    const std::vector<DrawCommand>& commands;
-};
-
 //ui element dosent know who it is without a manager
 class UIElement {
 private:
@@ -144,7 +161,7 @@ public:
 
 class UIScene {
 private:
-    std::vector<std::unique_ptr<UIElement>> ptrStore;
+    pointerVector ptrStore;
     std::vector<int> drawOrder;
     std::vector<RenderOp> displayList;
 
@@ -232,23 +249,37 @@ public:
 
 class Hierarchy{
 private:
+    TraversalData traversal;
+    const pointerVector* currentElementReferences;
+    int rootId = I_UNSET;
+    void CompileDisplayList(int elementId);
 public:
     bool hirearchyDirty = true;
+    const TraversalData& RebuildTraversal(pointerVector& elementPointers);
+    const TraversalData& ReturnCurrentTraversal() const;
+    // access treversal without needing to rebuild
 };
 
 class LayoutEngine{
-
+    //manage abs pos and layout
+    //take ptrStore to chase pointers...
+    //set abs positions from locals
+    //communicate if something was found dirty
+    //update layout of "dirty" element
+private:
+public:
 };
 
 class RenderBatcher{
-
+    //prepare Verticies, indicies, cmd list
 };
 
 class Renderer{
+    //only one aware of opengl
 private:
-    VAO FrameVAO;
-    VBO FrameVBO;
-    EBO FrameEBO;
+    VAO MainVAO;
+    VBO MainVBO;
+    EBO MainEBO;
     Shader DefaultShader;
     GLint resolutionUniform = I_UNSET;
 public:

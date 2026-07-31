@@ -4,15 +4,22 @@
 #include<glad/glad.h>
 #include"openglBasics/VBO.h"
 
+struct Layout{
+    GLuint index;
+    GLuint componentCount;
+    GLenum type;
+    GLboolean normalized;
+    GLsizeiptr stride;
+    size_t offset;
+};
+
 class VAO{
     public:
         GLuint ID;
-        VAO();
+        VAO() = default;
 
         //links a VBO to the VAO
-        void LinkAttrib(VBO VBO, GLuint layout, 
-                        GLuint numComponents, GLenum type, GLsizeiptr stride,
-                        void* offset);
+        void LinkAttrib(VBO VBO, Layout newLayout);
         void Bind();
         void Unbind();
         void Delete();

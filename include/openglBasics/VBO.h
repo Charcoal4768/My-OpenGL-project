@@ -6,10 +6,11 @@
 class VBO{
     public:
         GLuint ID;
-        VBO(GLsizeiptr size, const GLfloat *vertices);
+        VBO();
 
         void Bind();
         void Unbind();
+        void Data(GLsizeiptr size, const GLfloat *vertices);
         void Delete();
 };
 

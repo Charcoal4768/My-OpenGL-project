@@ -1,6 +1,7 @@
 #include <UI/UIElements.h>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 
 void UIScene::SetRootViewport(float width, float height){
@@ -167,6 +168,7 @@ const Color& UIScene::GetElementColor(int id) const {
 }
 
 void UIScene::RebuildHierarchy(){
+    //needs access to: ptrStore, rootId
     if (!hirearchyDirty) return;
 
     displayList.clear();
@@ -202,6 +204,75 @@ void UIScene::CompileDisplayList(int elementId){
         displayList.push_back({RenderOpType::PopScissor, elementId});
     }
     
+}
+
+const TraversalData& Hierarchy::RebuildTraversal(pointerVector& elementPointers){
+    //needs access to: ptrStore, rootId
+    if (!hirearchyDirty) return traversal;
+
+    traversal.displayList.clear();
+    traversal.drawOrder.clear();
+    traversal.parentIdLookup.clear();
+    currentElementReferences = &elementPointers;
+
+    if (currentElementReferences == nullptr) return traversal;
+
+    size_t targetCapacity = static_cast<size_t>(std::round(currentElementReferences->size() * 1.5));
+    
+    if (!currentElementReferences->empty() && rootId < currentElementReferences->size() && (*currentElementReferences)[rootId]){
+        if (targetCapacity > traversal.drawOrder.capacity() || targetCapacity > traversal.displayList.capacity()) {
+            traversal.drawOrder.reserve(targetCapacity);
+            traversal.displayList.reserve(targetCapacity);
+            traversal.parentIdLookup.reserve(targetCapacity);
+        }
+        CompileDisplayList(rootId);
+    }
+
+    hirearchyDirty = false;  
+    currentElementReferences = nullptr;
+    return traversal;
+}
+
+const TraversalData& Hierarchy::ReturnCurrentTraversal() const{
+    //redundant function but... good idea maybe
+    if (traversal.empty())
+    {
+        std::cout << "WARNING: Traversal Data has not yet been generated but was still requested." << std::endl;
+    }
+    return traversal;
+}
+
+void Hierarchy::CompileDisplayList(int elementId){
+    //expects traversal vectors to be fully empty
+    //ill change it to not assume that in the future
+
+    if (elementId < 0 || elementId >= currentElementReferences->size()) return;
+
+    UIElement* el = (*currentElementReferences)[elementId].get();
+
+    if (!el) return;
+
+    bool useScissor = el->clipChildren;
+
+    if(useScissor) {
+        traversal.displayList.push_back({RenderOpType::PushScissor, elementId});
+    }
+
+    traversal.displayList.push_back({RenderOpType::DrawElement, elementId});
+    traversal.drawOrder.emplace_back(elementId);
+
+    for (int childId : el->childIds){
+        CompileDisplayList(childId);
+    }
+
+    if (useScissor){
+        traversal.displayList.push_back({RenderOpType::PopScissor, elementId});
+    }
+    
+}
+
+void Renderer::Init(){
+
 }
 
 void UIScene::AddChild(int parentId, int childId) {
