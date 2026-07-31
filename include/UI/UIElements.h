@@ -250,9 +250,9 @@ public:
 class Hierarchy{
 private:
     TraversalData traversal;
-    const pointerVector* currentElementReferences;
+    const pointerVector* currentElementReferences = nullptr;
     int rootId = I_UNSET;
-    void CompileDisplayList(int elementId);
+    void RecursiveDownTraversal(int elementId);
 public:
     bool hirearchyDirty = true;
     const TraversalData& RebuildTraversal(pointerVector& elementPointers);
@@ -268,6 +268,7 @@ class LayoutEngine{
     //update layout of "dirty" element
 private:
 public:
+    void LayoutPass(const TraversalData& traversal);
 };
 
 class RenderBatcher{

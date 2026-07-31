@@ -216,16 +216,18 @@ const TraversalData& Hierarchy::RebuildTraversal(pointerVector& elementPointers)
     currentElementReferences = &elementPointers;
 
     if (currentElementReferences == nullptr) return traversal;
-
-    size_t targetCapacity = static_cast<size_t>(std::round(currentElementReferences->size() * 1.5));
+    
+    size_t targetCapacity = currentElementReferences->size() * 3 / 2;
     
     if (!currentElementReferences->empty() && rootId < currentElementReferences->size() && (*currentElementReferences)[rootId]){
-        if (targetCapacity > traversal.drawOrder.capacity() || targetCapacity > traversal.displayList.capacity()) {
+        if (targetCapacity > traversal.drawOrder.capacity() || 
+        targetCapacity > traversal.displayList.capacity() ||
+        targetCapacity > traversal.parentIdLookup.capacity()) {
             traversal.drawOrder.reserve(targetCapacity);
             traversal.displayList.reserve(targetCapacity);
             traversal.parentIdLookup.reserve(targetCapacity);
         }
-        CompileDisplayList(rootId);
+        RecursiveDownTraversal(rootId);
     }
 
     hirearchyDirty = false;  
@@ -242,17 +244,21 @@ const TraversalData& Hierarchy::ReturnCurrentTraversal() const{
     return traversal;
 }
 
-void Hierarchy::CompileDisplayList(int elementId){
+void Hierarchy::RecursiveDownTraversal(int elementId){
     //expects traversal vectors to be fully empty
     //ill change it to not assume that in the future
+    assert(currentElementReferences != nullptr);
 
-    if (elementId < 0 || elementId >= currentElementReferences->size()) return;
+    if (elementId == I_UNSET || elementId >= currentElementReferences->size()) return;
 
     UIElement* el = (*currentElementReferences)[elementId].get();
 
     if (!el) return;
 
     bool useScissor = el->clipChildren;
+    int parentId = el->parentId;
+
+    if (parentId == I_UNSET) return;
 
     if(useScissor) {
         traversal.displayList.push_back({RenderOpType::PushScissor, elementId});
@@ -260,9 +266,23 @@ void Hierarchy::CompileDisplayList(int elementId){
 
     traversal.displayList.push_back({RenderOpType::DrawElement, elementId});
     traversal.drawOrder.emplace_back(elementId);
+    if (parentId!=I_UNSET)
+    {
+        //index = element id, value = parent id
+        //sanity checks:
+        //elementId should exist in drawOrder | Done
+        //elementId should not be I_UNSET | Done
+        //Delete Function (to be implimented) will handle
+        //setting parentIdLookup[deletedId] = I_UNSET; | Pending
+        //every subsystem already ignores orphaned elements | Done
+        if (elementId >= traversal.parentIdLookup.size())
+        {
+            traversal.parentIdLookup.resize(elementId+1, I_UNSET);
+        }
+    }
 
     for (int childId : el->childIds){
-        CompileDisplayList(childId);
+        RecursiveDownTraversal(childId);
     }
 
     if (useScissor){
