@@ -72,9 +72,9 @@ struct RenderOp {
 
 struct RenderData
 {
-    const std::vector<Vertex>& vertices;
-    const std::vector<GLuint>& indices;
-    const std::vector<DrawCommand>& commands;
+    std::vector<Vertex> vertices;
+    std::vector<GLuint> indices;
+    std::vector<DrawCommand> commands;
 };
 
 struct TraversalData
@@ -112,7 +112,7 @@ struct GeometryStoreState{
     } //abs comparison delibirately ignored
 };
 
-struct ConstraintStoreState{
+struct StyleStoreState{
     float minWidth = F_UNSET;
     float minHeight = F_UNSET;
 
@@ -121,12 +121,15 @@ struct ConstraintStoreState{
 
     float prefferedWidthPercent = F_UNSET;
     float prefferedHeightPercent = F_UNSET;
+
+    bool hidden = false;
+
+    Color color;
 };
 
 struct UIStateTables {
     std::vector<GeometryStoreState> geometry;
-    std::vector<ConstraintStoreState> constraints;
-    std::vector<Color> colors;
+    std::vector<StyleStoreState> style;
 };
 
 //ui element dosent know who it is without a manager
@@ -155,24 +158,17 @@ public:
 
     virtual ~UIElement() = default;
 
-    virtual GeometryView Draw(const UIStateTables& data);
     virtual void UpdateLayout(UIStateTables& data);
 };
 
 class UIScene {
 private:
     pointerVector ptrStore;
-    std::vector<int> drawOrder;
-    std::vector<RenderOp> displayList;
-
     UIStateTables dataTables;
 
     bool hirearchyDirty = true;
     bool frameDataRebuild = true;
     int rootId = I_UNSET;
-
-    void MarkParentChainDirty(int startingId);
-    void CompileDisplayList(int elementId);
 
     std::vector<Vertex> globalVertices;
     std::vector<GLuint> globalIndices;
@@ -196,8 +192,7 @@ public:
 
     UIElement* GetElement(int id) const;
     const GeometryStoreState& GetElementShape(int id) const;
-    const ConstraintStoreState& GetElementConstraints(int id) const;
-    const Color& GetElementColor(int id) const;
+    const StyleStoreState& GetElementStyle(int id) const;
     
     float GetAbsoluteX(int id) const { return (id >= 0 && id < dataTables.geometry.size()) ? dataTables.geometry[id].absoluteX : 0.0f; }
     float GetAbsoluteY(int id) const { return (id >= 0 && id < dataTables.geometry.size()) ? dataTables.geometry[id].absoluteY : 0.0f; }
@@ -252,15 +247,25 @@ private:
     TraversalData traversal;
     const pointerVector* currentElementReferences = nullptr;
     int rootId = I_UNSET;
-    void RecursiveDownTraversal(int elementId);
 public:
     bool hirearchyDirty = true;
     const TraversalData& RebuildTraversal(pointerVector& elementPointers);
     const TraversalData& ReturnCurrentTraversal() const;
+    void RecursiveDownTraversal(int elementId);
+    void RecursiveUpTraversal(int elementId);
     // access treversal without needing to rebuild
 };
 
-class LayoutEngine{
+class LayoutContext {
+private:
+    const pointerVector* currentElementReferences = nullptr;
+    //layout engine will set this
+    //and it will clear and update this
+public:
+    void MarkParentChainDirty(int id);
+};
+
+class LayoutManager{
     //manage abs pos and layout
     //take ptrStore to chase pointers...
     //set abs positions from locals
@@ -268,10 +273,15 @@ class LayoutEngine{
     //update layout of "dirty" element
 private:
 public:
-    void LayoutPass(const TraversalData& traversal);
+    bool Run(const TraversalData& traversal, pointerVector& elementPointers, UIStateTables& dataTables);
 };
 
 class RenderBatcher{
+private:
+    RenderData FrameData;
+public:
+    const RenderData& ReBuildFrameData(UIStateTables& dataTables, const std::vector<RenderOp>& displayList, float viewportHeight);
+    const RenderData& GetFrameData() const;
     //prepare Verticies, indicies, cmd list
 };
 
@@ -283,15 +293,40 @@ private:
     EBO MainEBO;
     Shader DefaultShader;
     GLint resolutionUniform = I_UNSET;
+    //0th layout: 3 floats each
+    //not normalized, 7 floats apart
+    //0 offset from the start
+    Layout VertexLayout = {
+        0,
+        3,
+        GL_FLOAT,
+        GL_FALSE,
+        7*sizeof(float),
+        0
+    };
+    //1st layout: 4 floats each
+    //not normalized, 7 floats apart
+    //3 offset from the start
+    Layout FragmentLayout = {
+        1,
+        4,
+        GL_FLOAT,
+        GL_FALSE,
+        7*sizeof(float),
+        3
+    };
+    bool initialized = false;
 public:
     void Init();
-    // void UploadData();
-    void DrawFrame(const RenderData);
+    void UploadFrame(const RenderData&);
+    void DrawFrame(const RenderData&);
+    bool IsInitialized(){
+        return initialized;
+    }
 };
 
 class AnchorElement : public UIElement {
 public:
-    GeometryView Draw(const UIStateTables& data) override;
 };
 
 class PaddedElement : public UIElement {
@@ -301,7 +336,6 @@ class PaddedElement : public UIElement {
 
 class UIRect : public PaddedElement {
 public:
-    // GeometryView Draw(const UIScene& manager) override;
 };
 
 class VerticalContainer : public PaddedElement {
@@ -309,7 +343,6 @@ public:
     bool centerHorizontally = true;
     bool resizeChildren = false;
     float r = 0.6f, g = 0.1f, b = 0.8f;
-    // GeometryView Draw(const UIScene& manager) override;
     void UpdateLayout(UIStateTables& data) override;
 };
 

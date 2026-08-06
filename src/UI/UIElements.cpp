@@ -22,59 +22,53 @@ void UIScene::SetRootViewport(float width, float height){
 // }
 }
 
-std::array<float,2> ApplyConstraints(float computedWidth, float computedHeight, 
-float parentWidth, float parentHeight, const ConstraintStoreState& constraints){
+std::array<float,2> ApplyStyle(float computedWidth, float computedHeight, 
+float parentWidth, float parentHeight, const StyleStoreState& style){
     //we want final size to be basically css clamp() type stuff
     //preferredWidth/Height are percentages: 0.0 -> 1.0
     //also, either Percentages or absolute pixel sizing, both = bug in the app using this framework
     float prefferedWidth;
     float prefferedHeight;
 
-    prefferedWidth = (constraints.prefferedWidthPercent > F_UNSET) ? (constraints.prefferedWidthPercent * parentWidth) : computedWidth;
-    prefferedHeight = (constraints.prefferedHeightPercent > F_UNSET) ? (constraints.prefferedHeightPercent * parentHeight) : computedHeight;
+    prefferedWidth = (style.prefferedWidthPercent > F_UNSET) ? (style.prefferedWidthPercent * parentWidth) : computedWidth;
+    prefferedHeight = (style.prefferedHeightPercent > F_UNSET) ? (style.prefferedHeightPercent * parentHeight) : computedHeight;
 
-    if (constraints.maxWidth >= F_UNSET) prefferedWidth = std::min(prefferedWidth, constraints.maxWidth);
-    if (constraints.maxHeight >= F_UNSET) prefferedHeight = std::min(prefferedHeight, constraints.maxHeight);
+    if (style.maxWidth >= F_UNSET) prefferedWidth = std::min(prefferedWidth, style.maxWidth);
+    if (style.maxHeight >= F_UNSET) prefferedHeight = std::min(prefferedHeight, style.maxHeight);
 
     float finalWidth = prefferedWidth;
 
-    if (constraints.minWidth != F_UNSET)
-        finalWidth = std::max(finalWidth, constraints.minWidth);
+    if (style.minWidth != F_UNSET)
+        finalWidth = std::max(finalWidth, style.minWidth);
 
     float finalHeight = prefferedHeight;
 
-    if (constraints.minHeight != F_UNSET)
-        finalHeight = std::max(finalHeight, constraints.minHeight);
+    if (style.minHeight != F_UNSET)
+        finalHeight = std::max(finalHeight, style.minHeight);
 
     return {finalWidth, finalHeight};
 }
 
-bool LayoutPass(const std::vector<int>& drawOrder){
-    for (int elementId : drawOrder) { //use drawOrder made by traversal pass
-        if (!ptrStore[elementId]) continue;
-        float parentAbsX = 0.0f;
-        float parentAbsY = 0.0f;
-        int pId = ptrStore[elementId]->parentId;
+bool LayoutManager::Run(const TraversalData& traversal, 
+pointerVector& elementPointers, UIStateTables& dataTables){
+    bool rebuildRender = false;
+    for (int elementId : traversal.drawOrder)
+    {
+        int parentId = traversal.parentIdLookup[elementId];
+        if (parentId == I_UNSET) continue;
+        UIElement* el = elementPointers[elementId].get();
+        if (!el) continue;
         GeometryStoreState& elementShape = dataTables.geometry[elementId];
-        //{ compute absolute pos
-        if (pId != -1) {
-            GeometryStoreState& parentShape = dataTables.geometry[pId];
-            parentAbsX = parentShape.absoluteX;
-            parentAbsY = parentShape.absoluteY;
-        }
-        //}
-        elementShape.absoluteX = elementShape.localX + parentAbsX;
-        elementShape.absoluteY = elementShape.localY + parentAbsY;
-        if (ptrStore[elementId]->isDirty) { //actual layout update
-            ptrStore[elementId]->UpdateLayout(dataTables);
-            frameDataRebuild = true; //flag to say rebuild frame
-            // we will make this function
-            //a bool and based on its output, StepFrame will
-            //set frameDataRebuild
-            return true;
-        }
-        return false;
+        GeometryStoreState& parentShape = dataTables.geometry[parentId];
+        elementShape.absoluteX = parentShape.absoluteX + elementShape.localX;
+        elementShape.absoluteY = parentShape.absoluteY + elementShape.localY;
+        if (el->isDirty)
+        {
+            el->UpdateLayout(dataTables);
+            rebuildRender = true; //render commands need to be rebuilt
+        }        
     }
+    return rebuildRender;
 }
 
 ScissorRect IntersectRects(const ScissorRect& a, const ScissorRect& b){
@@ -129,7 +123,7 @@ void UIScene::EditElementColor(int id, const Color& newColor, bool dirtyChain){
 
     UIElement* el = ptrStore[id].get();
 
-    Color& elementColor = dataTables.colors[id];
+    Color& elementColor = dataTables.style[id].color;
 
     bool colorChanged = (elementColor != newColor);
 
@@ -153,57 +147,11 @@ const GeometryStoreState& UIScene::GetElementShape(int id) const
     return dataTables.geometry[id];
 }
 
-const ConstraintStoreState& UIScene::GetElementConstraints(int id) const{
+const StyleStoreState& UIScene::GetElementStyle(int id) const{
     assert(id >= 0);
-    assert(id < dataTables.constraints.size());
+    assert(id < dataTables.style.size());
 
-    return dataTables.constraints[id];
-}
-
-const Color& UIScene::GetElementColor(int id) const {
-    assert(id >= 0);
-    assert(id < dataTables.colors.size());
-
-    return dataTables.colors[id];
-}
-
-void UIScene::RebuildHierarchy(){
-    //needs access to: ptrStore, rootId
-    if (!hirearchyDirty) return;
-
-    displayList.clear();
-
-    if (!ptrStore.empty() && ptrStore[rootId]){
-        drawOrder.clear();
-        drawOrder.reserve(ptrStore.size());
-        CompileDisplayList(rootId);
-    }
-
-    hirearchyDirty = false;   
-}
-
-void UIScene::CompileDisplayList(int elementId){
-    UIElement* el = ptrStore[elementId].get();
-
-    if (!el) return;
-
-    bool useScissor = el->clipChildren;
-
-    if(useScissor) {
-        displayList.push_back({RenderOpType::PushScissor, elementId});
-    }
-
-    displayList.push_back({RenderOpType::DrawElement, elementId});
-    drawOrder.emplace_back(elementId);
-
-    for (int childId : el->childIds){
-        CompileDisplayList(childId);
-    }
-
-    if (useScissor){
-        displayList.push_back({RenderOpType::PopScissor, elementId});
-    }
-    
+    return dataTables.style[id];
 }
 
 const TraversalData& Hierarchy::RebuildTraversal(pointerVector& elementPointers){
@@ -291,8 +239,21 @@ void Hierarchy::RecursiveDownTraversal(int elementId){
     
 }
 
-void Renderer::Init(){
+void LayoutContext::MarkParentChainDirty(int elementId){
+    assert(currentElementReferences != nullptr);
 
+    if (elementId == I_UNSET || elementId >= currentElementReferences->size()) return;
+
+    UIElement* el = (*currentElementReferences)[elementId].get();
+
+    if (!el) return;
+
+    int parentId = el->parentId;
+    el->isDirty=true;
+
+    if (parentId == I_UNSET) return;
+
+    MarkParentChainDirty(parentId);
 }
 
 void UIScene::AddChild(int parentId, int childId) {
@@ -338,130 +299,141 @@ ScreenLayoutMode UIScene::GetScreenLayoutMode() const{
 
 void UIScene::StepFrame(std::array<float,2>& resolution){
 
-    if (hirearchyDirty) {
-        RebuildHierarchy(); //update treversal
+}
+
+static void AppendQuad(
+    RenderData& frame,
+    const GeometryStoreState& geometry,
+    const Color& color)
+{
+    GLuint baseVertex = static_cast<GLuint>(frame.vertices.size());
+
+    float x = geometry.absoluteX;
+    float y = geometry.absoluteY;
+    float w = geometry.width;
+    float h = geometry.height;
+
+    frame.vertices.push_back({{x,     y,     0.0f}, {color.r,color.g,color.b,color.a}});
+    frame.vertices.push_back({{x + w, y,     0.0f}, {color.r,color.g,color.b,color.a}});
+    frame.vertices.push_back({{x + w, y + h, 0.0f}, {color.r,color.g,color.b,color.a}});
+    frame.vertices.push_back({{x,     y + h, 0.0f}, {color.r,color.g,color.b,color.a}});
+
+    constexpr GLuint quadIndices[6] = {0,1,2,0,2,3};
+
+    for (GLuint index : quadIndices)
+    {
+        frame.indices.push_back(baseVertex + index);
     }
+}
 
-    bool frameDataRebuild = false;
+static ScissorRect BuildScissorRect(
+    const GeometryStoreState& geometry,
+    float viewportHeight)
+{
+    return {
+        static_cast<GLint>(geometry.absoluteX),
+        static_cast<GLint>(viewportHeight - (geometry.absoluteY + geometry.height)),
+        static_cast<GLsizei>(geometry.width),
+        static_cast<GLsizei>(geometry.height)
+    };
+}
 
-    // if (!ptrStore.empty() && ptrStore[rootId]) { //sync UI root to window size
-    //     float newWidth  = resolution[0];
-    //     float newHeight = resolution[1];
-    //     GeometryStoreState& rootShape = dataTables.geometry[rootId];
+const RenderData& RenderBatcher::ReBuildFrameData(UIStateTables& dataTables, const std::vector<RenderOp>& displayList, float viewportHeight){
+    FrameData.vertices.clear();
+    FrameData.indices.clear();
+    FrameData.commands.clear();
 
-    //     if (rootShape.width != newWidth || rootShape.height != newHeight) {
-    //         rootShape.width = newWidth;
-    //         rootShape.height = newHeight;
-    //         ptrStore[rootId]->isDirty = true; 
-    //         frameDataRebuild = true;
-    //     }
-    // }
+    DrawCommand currentBatch; //we make a new batch
+    currentBatch.indexOffset = 0;
+    currentBatch.indexCount = 0;
 
-    size_t elementCount = drawOrder.size(); //need to fetch this from traversal
-    //need to fetch displayList too
+    std::vector<ScissorRect> scissorRects;
 
-    if (elementCount > 0){//layout pass
-        //layout stuff will happen here
-    }
-
-    if (frameDataRebuild) { //renderBatcher == this block
-        globalVertices.clear();
-        globalIndices.clear(); //reset all buffers
-        drawCommands.clear();
-
-        DrawCommand currentBatch;
-        currentBatch.indexOffset = 0; //we make a new batch
-        currentBatch.indexCount = 0;
-
-        std::vector<ScissorRect> scissorRects;
-
-        for (const RenderOp& op : displayList){ //unpack the displayList
-            if (op.type == RenderOpType::PushScissor){
+    for (const RenderOp& op : displayList)
+    {
+        switch (op.type){
+            case RenderOpType::PushScissor:{
                 if (currentBatch.indexCount > 0){
-                    drawCommands.push_back(currentBatch);
-                    currentBatch.indexOffset = globalIndices.size();
+                    FrameData.commands.push_back(currentBatch);
+                    currentBatch.indexOffset = FrameData.indices.size();
                     currentBatch.indexCount = 0;
                 }
 
-                float windowHeight = GetHeight(rootId);
-                float elementWdith = GetWidth(op.elementId);
-                float elementHeight = GetHeight(op.elementId);
-                float elementY = GetAbsoluteY(op.elementId);
-                float elementX = GetAbsoluteX(op.elementId);
-                ScissorRect newRect = {
-                    static_cast<GLint>(elementX),
-                    static_cast<GLint>(windowHeight - (elementY + elementHeight)),
-                    static_cast<GLsizei>(elementWdith),
-                    static_cast<GLsizei>(elementHeight),
-                };
-                
+                ScissorRect rect = BuildScissorRect(
+                    dataTables.geometry[op.elementId],
+                    viewportHeight);
+
                 if (!scissorRects.empty()){
-                    newRect = IntersectRects(scissorRects.back(), newRect);
+                    rect = IntersectRects(scissorRects.back(), rect);
                 }
 
-                scissorRects.push_back(newRect);
-                currentBatch.useScissor = true;
-                currentBatch.scissorBox = newRect;
-            }
+                scissorRects.push_back(rect);
 
-            else if (op.type == RenderOpType::PopScissor){
+                currentBatch.useScissor = true;
+                currentBatch.scissorBox = rect;
+                
+                break;
+            }
+            
+            case RenderOpType::PopScissor:{
                 if (currentBatch.indexCount > 0){
-                    drawCommands.push_back(currentBatch);
-                    currentBatch.indexOffset = globalIndices.size();
-                    currentBatch.indexCount = 0;  
+                    FrameData.commands.push_back(currentBatch);
+                    currentBatch.indexOffset = FrameData.indices.size();
+                    currentBatch.indexCount = 0;
                 }
 
                 scissorRects.pop_back();
 
-                //try to use parent scissor
-                //or if no scissor Rects remain, turn off the flag
                 if (scissorRects.empty()){
                     currentBatch.useScissor = false;
-                } else {
+                }
+                else{
                     currentBatch.useScissor = true;
                     currentBatch.scissorBox = scissorRects.back();
                 }
+                break;
             }
 
-            else if (op.type == RenderOpType::DrawElement){
-                UIElement* element = ptrStore[op.elementId].get();
-                if (element){
-                    GeometryView view = element->Draw(dataTables);//get element geometry
-                    GLuint baseVertexOffset = static_cast<GLuint>(globalVertices.size());
-                    
-                    //put geometry into appropriate group
-                    globalVertices.insert(globalVertices.end(), view.verticesPtr, view.verticesPtr + view.vertexCount);
-
-                    for (size_t i = 0; i < view.indexCount; i++) {
-                        globalIndices.push_back(baseVertexOffset + view.indicesPtr[i]);
-                    }
-                    currentBatch.indexCount += view.indexCount;//batch book-keep
-                }
+            case RenderOpType::DrawElement:{
+                const GeometryStoreState& geometry = dataTables.geometry[op.elementId];
+                const StyleStoreState& style = dataTables.style[op.elementId];
+                if (style.hidden) break;
+                AppendQuad(FrameData, geometry, style.color);
+                currentBatch.indexCount += 6;
+                break;
             }
-        }
-        if (currentBatch.indexCount > 0) {
-            drawCommands.push_back(currentBatch);
+            
+            default:
+                break;
         }
     }
+
+    if (currentBatch.indexCount > 0)
+    {
+        FrameData.commands.push_back(currentBatch);
+    }
+    return FrameData;
 }
 
-GeometryView UIElement::Draw(const UIStateTables& dataTables){
-    GeometryStoreState elementShape = dataTables.geometry[id];
-    Color col = dataTables.colors[id];
-
-    float absX = elementShape.absoluteX; float absY = elementShape.absoluteY;
-    float width = elementShape.width; float height = elementShape.height;
-
-    drawRect.localVertices[0] = {{absX,         absY,         0.0f},{col.r,col.g,col.b,col.a}};
-    drawRect.localVertices[1] = {{absX + width, absY,         0.0f},{col.r,col.g,col.b,col.a}};
-    drawRect.localVertices[2] = {{absX + width, absY + width, 0.0f},{col.r,col.g,col.b,col.a}};
-    drawRect.localVertices[3] = {{absX,         absY + width, 0.0f},{col.r,col.g,col.b,col.a}};
-
-    return { drawRect.localVertices.data(), drawRect.localVertices.size(), drawRect.localIndices.data(), drawRect.localIndices.size() };
+const RenderData& RenderBatcher::GetFrameData() const{
+    return FrameData;
 }
 
-GeometryView AnchorElement::Draw(const UIStateTables& dataTables) {
-    return { nullptr, 0, nullptr, 0 };
+void Renderer::Init(){
+    if (initialized) return;
+    DefaultShader.Load("default.vert", "default.frag");
+    MainVAO.Bind();
+    MainVBO.Bind();
+    MainEBO.Bind();
+
+    //set layouts 1 and 0 on VAO
+    MainVAO.LinkAttrib(MainVBO, VertexLayout);
+    MainVAO.LinkAttrib(MainVBO, FragmentLayout);
+
+    MainVAO.Unbind();
+    MainVBO.Unbind();
+    MainEBO.Unbind();
+    initialized = true;
 }
 
 void VerticalContainer::UpdateLayout(UIStateTables& data){
@@ -477,10 +449,10 @@ void VerticalContainer::UpdateLayout(UIStateTables& data){
 
     for (int childId : childIds){
         GeometryStoreState& childData = data.geometry[childId];
-        ConstraintStoreState& childConstraints = data.constraints[childId];
+        StyleStoreState& childstyle = data.style[childId];
         if (resizeChildren){
             float bigger = std::max(childData.width, childData.height);
-            auto size = ApplyConstraints(bigger, bigger, myData.width, myData.height, childConstraints);
+            auto size = ApplyStyle(bigger, bigger, myData.width, myData.height, childstyle);
             childData.width = size[0];
             childData.height = size[1];
         }

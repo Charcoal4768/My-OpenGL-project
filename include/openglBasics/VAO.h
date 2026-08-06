@@ -10,7 +10,7 @@ struct Layout{
     GLenum type;
     GLboolean normalized;
     GLsizeiptr stride;
-    size_t offset;
+    GLsizei offset;
 };
 
 class VAO{
