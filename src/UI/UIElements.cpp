@@ -236,8 +236,9 @@ Hierarchy::RebuildTraversal(pointerVector &elementPointers) {
 
     if (rootId < 0 || rootId >= currentElementReferences->size() ||
         !(*currentElementReferences)[rootId]) {
-        std::cout << "ERROR: Invalid rootId (" << rootId
-                  << ") in Hierarchy::RebuildTraversal!" << std::endl;
+        if (debug)
+            std::cout << "ERROR: Invalid rootId (" << rootId
+                      << ") in Hierarchy::RebuildTraversal!" << std::endl;
         hirearchyDirty = false;
         currentElementReferences = nullptr;
         return traversal;
@@ -266,10 +267,11 @@ Hierarchy::RebuildTraversal(pointerVector &elementPointers) {
 const TraversalData &Hierarchy::ReturnCurrentTraversal() const {
     // redundant function but... good idea maybe
     if (traversal.empty()) {
-        std::cout
-            << "WARNING: Traversal Data has not yet been generated but was "
-               "still requested."
-            << std::endl;
+        if (debug)
+            std::cout
+                << "WARNING: Traversal Data has not yet been generated but was "
+                   "still requested."
+                << std::endl;
     }
     return traversal;
 }
@@ -311,7 +313,8 @@ void Hierarchy::RecursiveDownTraversal(int elementId) {
             traversal.parentIdLookup.resize(elementId + 1, I_UNSET);
         }
         traversal.parentIdLookup[elementId] = parentId;
-        std::cout << elementId << "=" << parentId << std::endl;
+        if (debug)
+            std::cout << elementId << "=" << parentId << std::endl;
     }
 
     for (int childId : el->childIds) {
@@ -330,6 +333,20 @@ void UIScene::Init() {
         MainRenderer.Init();
     MainHierarchy.hirearchyDirty = true;
 }
+
+void UIScene::SetDebug(bool enabled) {
+    debug = enabled;
+    MainHierarchy.debug = enabled;
+    MainLayout.SetDebug(enabled);
+    MainBatcher.SetDebug(enabled);
+    MainRenderer.SetDebug(enabled);
+}
+
+void LayoutManager::SetDebug(bool enabled) { debug = enabled; }
+
+void RenderBatcher::SetDebug(bool enabled) { debug = enabled; }
+
+void Renderer::SetDebug(bool enabled) { debug = enabled; }
 
 void UIScene::AddChild(int parentId, int childId) {
     if (parentId < 0 || parentId >= ptrStore.size() || !ptrStore[parentId])
@@ -389,15 +406,18 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
     TraversalData frameTraversalData;
     if (MainHierarchy.hirearchyDirty == true) {
         frameTraversalData = MainHierarchy.RebuildTraversal(ptrStore);
-        std::cout << "Building Traversal" << std::endl;
+        if (debug)
+            std::cout << "Building Traversal" << std::endl;
     } else {
         frameTraversalData = MainHierarchy.ReturnCurrentTraversal();
-        std::cout << "Skipping Traversal" << std::endl;
+        if (debug)
+            std::cout << "Skipping Traversal" << std::endl;
     }
 
     const TraversalData &currentTraversalData = frameTraversalData;
     if (currentTraversalData.empty()) {
-        std::cout << "Scene Empty" << std::endl;
+        if (debug)
+            std::cout << "Scene Empty" << std::endl;
         return;
     }
 
@@ -408,60 +428,26 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
     if (frameGraphicalData.empty() || rebuildFrameData) {
         frameGraphicalData = MainBatcher.ReBuildFrameData(
             dataTables, currentTraversalData.displayList, resolution[1]);
-        std::cout << "Rebuilding Frame" << std::endl;
+        if (debug)
+            std::cout << "Rebuilding Frame" << std::endl;
     }
 
     const RenderData &currentGraphicalData = frameGraphicalData;
     if (currentGraphicalData.empty()) {
-        std::cout << "Data Empty" << std::endl;
+        if (debug)
+            std::cout << "Data Empty" << std::endl;
         return;
     }
 
     if (!MainRenderer.IsInitialized())
         MainRenderer.Init();
 
-    std::cout << "Vertices: " << currentGraphicalData.vertices.size()
-              << " | Indices: " << currentGraphicalData.indices.size()
-              << " | Commands: " << currentGraphicalData.commands.size()
-              << std::endl;
+    if (debug)
+        std::cout << "Vertices: " << currentGraphicalData.vertices.size()
+                  << " | Indices: " << currentGraphicalData.indices.size()
+                  << " | Commands: " << currentGraphicalData.commands.size()
+                  << std::endl;
 
-    // 1. Print Vertices
-    std::cout << "\n=== Vertices (" << currentGraphicalData.vertices.size()
-              << ") ===" << std::endl;
-    for (size_t i = 0; i < currentGraphicalData.vertices.size(); ++i) {
-        const auto &v = currentGraphicalData.vertices[i];
-        std::cout << "  Vertex [" << i << "]: "
-                  << "Pos(" << v.pos[0] << ", " << v.pos[1] << ", " << v.pos[2]
-                  << ") | "
-                  << "Color(" << v.color[0] << ", " << v.color[1] << ", "
-                  << v.color[2] << ", " << v.color[3] << ")\n";
-    }
-
-    // 2. Print Indices
-    std::cout << "\n=== Indices (" << currentGraphicalData.indices.size()
-              << ") ===" << std::endl;
-    for (size_t i = 0; i < currentGraphicalData.indices.size(); ++i) {
-        std::cout << "  Index [" << i
-                  << "]: " << currentGraphicalData.indices[i] << "\n";
-    }
-
-    // 3. Print Draw Commands
-    std::cout << "\n=== Draw Commands (" << currentGraphicalData.commands.size()
-              << ") ===" << std::endl;
-    for (size_t i = 0; i < currentGraphicalData.commands.size(); ++i) {
-        const auto &cmd = currentGraphicalData.commands[i];
-        std::cout << "  Command [" << i << "]: "
-                  << "Index Offset: " << cmd.indexOffset
-                  << " | Index Count: " << cmd.indexCount
-                  << " | Use Scissor: " << (cmd.useScissor ? "true" : "false");
-        if (cmd.useScissor) {
-            std::cout << " | ScissorBox (x: " << cmd.scissorBox.x
-                      << ", y: " << cmd.scissorBox.y
-                      << ", w: " << cmd.scissorBox.w
-                      << ", h: " << cmd.scissorBox.h << ")";
-        }
-        std::cout << "\n";
-    }
     MainRenderer.UploadFrame(currentGraphicalData);
     MainRenderer.DrawFrame(currentGraphicalData.commands, resolution);
 }
@@ -582,7 +568,8 @@ const RenderData &RenderBatcher::GetFrameData() const { return FrameData; }
 
 void Renderer::Init() {
     if (initialized) {
-        std::cout << "WARNING: RENDERER ALREADY INITIALIZED" << std::endl;
+        if (debug)
+            std::cout << "WARNING: RENDERER ALREADY INITIALIZED" << std::endl;
         return;
     }
     DefaultShader.Load("default.vert", "default.frag");
@@ -599,26 +586,47 @@ void Renderer::Init() {
     MainEBO.Unbind();
     resolutionUniform = glGetUniformLocation(DefaultShader.ID, "u_resolution");
     initialized = true;
+    if (debug)
+        std::cout << "VAO ID: " << MainVAO.ID << " | VBO ID: " << MainVBO.ID
+                  << " | EBO ID: " << MainEBO.ID << std::endl;
 }
 
 void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
                          const std::array<float, 2> &resolution) {
     if (!initialized) {
-        std::cout
-            << "WARNING: RENDERER NOT INITIALIZED BUT Renderer::DrawFrame() "
-               "WAS CALLED"
-            << std::endl;
+        if (debug)
+            std::cout << "WARNING: RENDERER NOT INITIALIZED BUT "
+                         "Renderer::DrawFrame() "
+                         "WAS CALLED"
+                      << std::endl;
         return;
     }
-    DefaultShader.Activate();
-    glUniform2f(resolutionUniform, static_cast<float>(resolution[0]),
-                static_cast<float>(resolution[1]));
+    while (glGetError() != GL_NO_ERROR)
+        ;
 
-    if (resolutionUniform == -1) {
-        std::cout << "WARNING: u_resolution uniform not found." << std::endl;
+    DefaultShader.Activate();
+
+    if (resolutionUniform != -1) {
+        glUniform2f(resolutionUniform, static_cast<float>(resolution[0]),
+                    static_cast<float>(resolution[1]));
+
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            if (debug)
+                std::cout << "Error in glUniform2f (loc=" << resolutionUniform
+                          << "): 0x" << std::hex << err << std::dec
+                          << std::endl;
+        }
+    } else {
+        if (debug)
+            std::cout << "WARNING: u_resolution uniform location is -1! Check "
+                         "Shader::Load."
+                      << std::endl;
     }
 
     MainVAO.Bind();
+    MainEBO.Bind();
+    MainVBO.Bind();
 
     for (const DrawCommand &cmd : commandsData) {
         if (cmd.indexCount == 0)
@@ -627,23 +635,46 @@ void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
             glEnable(GL_SCISSOR_TEST);
             glScissor(cmd.scissorBox.x, cmd.scissorBox.y, cmd.scissorBox.w,
                       cmd.scissorBox.h);
+
+            GLenum err = glGetError();
+            if (err != GL_NO_ERROR) {
+                if (debug)
+                    std::cout << "Error in glScissor (" << cmd.scissorBox.w
+                              << "x" << cmd.scissorBox.h << "): 0x" << std::hex
+                              << err << std::dec << std::endl;
+            }
         } else {
             glDisable(GL_SCISSOR_TEST);
         }
+
         glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(cmd.indexCount),
                        GL_UNSIGNED_INT,
                        (void *)(cmd.indexOffset * sizeof(GLuint)));
+
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            if (debug)
+                std::cout << "Error in glDrawElements: 0x" << std::hex << err
+                          << std::dec << std::endl;
+        }
     }
 
+    if (debug)
+        std::cout << "VAO ID: " << MainVAO.ID << " | VBO ID: " << MainVBO.ID
+                  << " | EBO ID: " << MainEBO.ID << std::endl;
+
     glDisable(GL_SCISSOR_TEST);
+    MainEBO.Unbind();
+    MainVBO.Unbind();
     MainVAO.Unbind();
 }
 
 void Renderer::UploadFrame(const RenderData &frameData) {
     if (!initialized) {
-        std::cout << "WARNING: RENDERER NOT INITIALIZED BUT "
-                     "Renderer::UploadFrame() WAS CALLED"
-                  << std::endl;
+        if (debug)
+            std::cout << "WARNING: RENDERER NOT INITIALIZED BUT "
+                         "Renderer::UploadFrame() WAS CALLED"
+                      << std::endl;
         return;
     }
     MainVAO.Bind();

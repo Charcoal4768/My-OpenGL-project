@@ -170,6 +170,7 @@ class Hierarchy {
 
   public:
     bool hirearchyDirty = true;
+    bool debug = false;
     const TraversalData &RebuildTraversal(pointerVector &elementPointers);
     const TraversalData &ReturnCurrentTraversal() const;
     void RecursiveDownTraversal(int elementId);
@@ -187,16 +188,19 @@ class LayoutManager {
   private:
     LayoutContext context;
     int rootId = I_UNSET;
+    bool debug = false;
 
   public:
     bool Run(const TraversalData &traversal, pointerVector &elementPointers,
              UIStateTables &dataTables);
     void SetRoot(int id);
+    void SetDebug(bool enabled);
 };
 
 class RenderBatcher {
   private:
     RenderData FrameData;
+    bool debug = false;
 
   public:
     const RenderData &ReBuildFrameData(UIStateTables &dataTables,
@@ -204,6 +208,7 @@ class RenderBatcher {
                                        float viewportHeight);
     const RenderData &GetFrameData() const;
     // prepare Verticies, indicies, cmd list
+    void SetDebug(bool enabled);
 };
 
 class Renderer {
@@ -233,6 +238,7 @@ class Renderer {
                              7 * sizeof(float),
                              static_cast<uintptr_t>(3 * sizeof(float))};
     bool initialized = false;
+    bool debug = false;
 
   public:
     void Init();
@@ -240,6 +246,7 @@ class Renderer {
     void DrawFrame(const std::vector<DrawCommand> &commandsData,
                    const std::array<float, 2> &resolution);
     bool IsInitialized() { return initialized; }
+    void SetDebug(bool enabled);
 };
 
 class AnchorElement : public UIElement {
@@ -258,6 +265,7 @@ class UIScene {
     LayoutManager MainLayout;
     RenderBatcher MainBatcher;
     Renderer MainRenderer;
+    bool debug = false;
 
   public:
     int defaultCapacity = 100; // for ptrStore
@@ -266,6 +274,7 @@ class UIScene {
     float viewportHeight = F_UNSET;
 
     void Init();
+    void SetDebug(bool enabled);
     void SetRoot(int id);
     void EditElementShape(int id, const GeometryStoreState &props,
                           bool dirtyChain);

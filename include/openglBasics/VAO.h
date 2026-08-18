@@ -15,7 +15,7 @@ struct Layout {
 class VAO {
   public:
     GLuint ID;
-    VAO() = default;
+    VAO();
 
     // links a VBO to the VAO
     void LinkAttrib(VBO &VBO, Layout newLayout);
