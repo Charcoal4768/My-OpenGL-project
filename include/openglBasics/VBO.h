@@ -10,7 +10,7 @@ class VBO{
 
         void Bind();
         void Unbind();
-        void Data(GLsizeiptr size, const GLfloat *vertices);
+        void Data(GLsizeiptr size, const void *vertices);
         void Delete();
 };
 

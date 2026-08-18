@@ -45,23 +45,6 @@ int main(){
 
 	glViewport(0,0,resolution[0], resolution[1]);
 
-	Shader shaderProgram("default.vert", "default.frag");
-
-	VAO VAO1;
-	VAO1.Bind();
-
-	VBO VBO1(0, nullptr);
-	EBO EBO1(0, nullptr);
-    
-	VAO1.LinkAttrib(VBO1, 0, 3, GL_FLOAT, 7 * sizeof(float), (void*)0);
-	VAO1.LinkAttrib(VBO1, 1, 4, GL_FLOAT, 7 * sizeof(float), (void*)(3 * sizeof(float)));
-
-	VAO1.Unbind();
-	VBO1.Unbind();
-	EBO1.Unbind();
-
-	GLuint resUniID = glGetUniformLocation(shaderProgram.ID, "u_resolution");
-
     UIManager uIManager;
 	
 	auto rect2 = uIManager.AddElement<UIRect>();
@@ -124,46 +107,8 @@ int main(){
 		glClear(GL_COLOR_BUFFER_BIT);
 
         uIManager.StepFrame(resolution);
-
-		shaderProgram.Activate();
-		glUniform2f(resUniID, static_cast<float>(resolution[0]), static_cast<float>(resolution[1]));
-
-		VAO1.Bind();
-
-        const auto& dynamicVerts = uIManager.globalVertices;
-        const auto& dynamicIndices = uIManager.globalIndices;
-
-        VBO1.Bind();
-        glBufferData(GL_ARRAY_BUFFER, dynamicVerts.size() * sizeof(Vertex), dynamicVerts.data(), GL_DYNAMIC_DRAW);
-
-        EBO1.Bind();
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, dynamicIndices.size() * sizeof(GLuint), dynamicIndices.data(), GL_DYNAMIC_DRAW);
-
-		for (const auto& cmd : uIManager.drawCommands) {
-				if (cmd.indexCount == 0) continue;
-
-				if (cmd.useScissor) {
-					glEnable(GL_SCISSOR_TEST);
-					glScissor(cmd.scissorBox.x, cmd.scissorBox.y, cmd.scissorBox.w, cmd.scissorBox.h);
-				} else {
-					glDisable(GL_SCISSOR_TEST);
-				}
-
-				glDrawElements(
-					GL_TRIANGLES, 
-					static_cast<GLsizei>(cmd.indexCount), 
-					GL_UNSIGNED_INT, 
-					(void*)(cmd.indexOffset * sizeof(GLuint)) // Offset in bytes!
-				);
-			}
 		glfwSwapBuffers(window);
-        glDisable(GL_SCISSOR_TEST);
 	}
-
-	VAO1.Delete();
-	VBO1.Delete();
-	EBO1.Delete();
-	shaderProgram.Delete();
 
     glfwDestroyWindow(window);
 	glfwTerminate();

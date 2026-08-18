@@ -9,7 +9,7 @@ void VBO::Bind(){
     glBindBuffer(GL_ARRAY_BUFFER, ID);
 }
 
-void VBO::Data(GLsizeiptr size, const GLfloat *vertices){
+void VBO::Data(GLsizeiptr size, const void *vertices){
     if (vertices == nullptr) return;
     if (size <= 0) return;
     Bind();

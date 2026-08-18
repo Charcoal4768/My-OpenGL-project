@@ -52,6 +52,8 @@ float parentWidth, float parentHeight, const StyleStoreState& style){
 bool LayoutManager::Run(const TraversalData& traversal, 
 pointerVector& elementPointers, UIStateTables& dataTables){
     bool rebuildRender = false;
+    if (elementPointers.back() == nullptr) return rebuildRender;
+    context.currentElementReferences = &elementPointers;
     for (int elementId : traversal.drawOrder)
     {
         int parentId = traversal.parentIdLookup[elementId];
@@ -68,7 +70,35 @@ pointerVector& elementPointers, UIStateTables& dataTables){
             rebuildRender = true; //render commands need to be rebuilt
         }        
     }
+    context.currentElementReferences = nullptr;
     return rebuildRender;
+}
+
+void LayoutContext::MarkDirty(int id)
+{
+    assert(currentElementReferences != nullptr);
+    if (id == I_UNSET || id >= currentElementReferences->size()) return;
+
+    UIElement* el = (*currentElementReferences)[id].get();
+    if (el)
+        el->isDirty = true;
+}
+
+void LayoutContext::MarkParentChainDirty(int elementId){
+    assert(currentElementReferences != nullptr);
+
+    if (elementId == I_UNSET || elementId >= currentElementReferences->size()) return;
+
+    UIElement* el = (*currentElementReferences)[elementId].get();
+
+    if (!el) return;
+
+    int parentId = el->parentId;
+    el->isDirty=true;
+
+    if (parentId == I_UNSET) return;
+
+    MarkParentChainDirty(parentId);
 }
 
 ScissorRect IntersectRects(const ScissorRect& a, const ScissorRect& b){
@@ -239,22 +269,7 @@ void Hierarchy::RecursiveDownTraversal(int elementId){
     
 }
 
-void LayoutContext::MarkParentChainDirty(int elementId){
-    assert(currentElementReferences != nullptr);
 
-    if (elementId == I_UNSET || elementId >= currentElementReferences->size()) return;
-
-    UIElement* el = (*currentElementReferences)[elementId].get();
-
-    if (!el) return;
-
-    int parentId = el->parentId;
-    el->isDirty=true;
-
-    if (parentId == I_UNSET) return;
-
-    MarkParentChainDirty(parentId);
-}
 
 void UIScene::AddChild(int parentId, int childId) {
     if (parentId < 0 || parentId >= ptrStore.size() || !ptrStore[parentId]) return;
@@ -288,7 +303,7 @@ void UIScene::RemoveChild(int childId) {
     hirearchyDirty = true;
 }
 
-void UIElement::UpdateLayout(UIStateTables& data) {
+void UIElement::UpdateLayout(UIStateTables& data, LayoutContext& context) {
     isDirty = false;
 }
 
@@ -420,7 +435,10 @@ const RenderData& RenderBatcher::GetFrameData() const{
 }
 
 void Renderer::Init(){
-    if (initialized) return;
+    if (initialized){
+        std::cout << "WARNING: RENDERER ALREADY INITIALIZED" << std::endl;
+        return;
+    }
     DefaultShader.Load("default.vert", "default.frag");
     MainVAO.Bind();
     MainVBO.Bind();
@@ -433,10 +451,56 @@ void Renderer::Init(){
     MainVAO.Unbind();
     MainVBO.Unbind();
     MainEBO.Unbind();
+    resolutionUniform = glGetUniformLocation(DefaultShader.ID, "u_resolution");
     initialized = true;
 }
 
-void VerticalContainer::UpdateLayout(UIStateTables& data){
+void Renderer::DrawFrame(const RenderData& frameData, const std::array<float,2>& resolution){
+    if (!initialized){
+        std::cout << "WARNING: RENDERER NOT INITIALIZED BUT Renderer::DrawFrame() WAS CALLED" << std::endl; 
+        return;
+    }
+    DefaultShader.Activate();
+	glUniform2f(resolutionUniform, static_cast<float>(resolution[0]), static_cast<float>(resolution[1]));
+    if (resolutionUniform == -1)
+    {
+        std::cout << "WARNING: u_resolution uniform not found." << std::endl;
+    }
+    MainVAO.Bind();
+
+    for (const DrawCommand& cmd : frameData.commands){
+		if (cmd.indexCount == 0) continue;
+		if (cmd.useScissor) {
+			glEnable(GL_SCISSOR_TEST);
+			glScissor(cmd.scissorBox.x, cmd.scissorBox.y, cmd.scissorBox.w, cmd.scissorBox.h);
+		} else {
+			glDisable(GL_SCISSOR_TEST);
+		}
+		glDrawElements(
+			GL_TRIANGLES, 
+			static_cast<GLsizei>(cmd.indexCount), 
+			GL_UNSIGNED_INT, 
+			(void*)(cmd.indexOffset * sizeof(GLuint))
+		);
+    }
+    glDisable(GL_SCISSOR_TEST);
+    MainVAO.Unbind();
+}
+
+void Renderer::UploadFrame(const RenderData& frameData){
+    if (!initialized){
+        std::cout << "WARNING: RENDERER NOT INITIALIZED BUT Renderer::UploadFrame() WAS CALLED" << std::endl; 
+        return;
+    }
+    MainVAO.Bind();
+    MainVBO.Data(frameData.vertices.size() * sizeof(Vertex), frameData.vertices.data());
+    MainEBO.Data(frameData.indices.size() * sizeof(GLuint), frameData.indices.data());
+    MainVAO.Unbind();
+    MainVBO.Unbind();
+    MainEBO.Unbind();
+}
+
+void VerticalContainer::UpdateLayout(UIStateTables& data, LayoutContext& context){
     if (childIds.empty()) {
         isDirty = false;
         return;
@@ -473,10 +537,17 @@ void VerticalContainer::UpdateLayout(UIStateTables& data){
             targetX = padding;
         }
 
-        childData.x = targetX;
-        childData.y = targetY;
+        float oldChildX = childData.localX;
+        float oldChildY = childData.localY;
 
-        UIScene->EditElement(childId, childData, false);
+        childData.localX = targetX;
+        childData.localY = targetY;
+
+        if (oldChildX != childData.localX ||
+            oldChildY != childData.localY)
+        {
+            context.MarkDirty(childId);
+        }
 
         targetY += padding + childData.height;
     }

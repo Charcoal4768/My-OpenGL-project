@@ -40,12 +40,6 @@ struct DrawCommand{
     ScissorRect scissorBox;
 };
 
-struct ElementGeometry {
-    float x, y;
-    float width, height;
-    float r, g, b, a;
-};
-
 struct Color{
     float r, g, b, a;
     bool operator!=(const Color& other) const {
@@ -89,13 +83,6 @@ struct TraversalData
             parentIdLookup.empty()
         );
     }
-};
-
-struct GeometryView {
-    const Vertex* verticesPtr;
-    size_t vertexCount;
-    const GLuint* indicesPtr;
-    size_t indexCount;
 };
 
 struct GeometryStoreState{
@@ -154,11 +141,13 @@ public:
     float widthPercent = F_UNSET; //b/w 0.0f and 1.0f
     float heightPercent = F_UNSET;
 
+    float padding = 5.0f;
+
     std::vector<int> childIds;
 
     virtual ~UIElement() = default;
 
-    virtual void UpdateLayout(UIStateTables& data);
+    virtual void UpdateLayout(UIStateTables& data, LayoutContext& context);
 };
 
 class UIScene {
@@ -261,7 +250,9 @@ private:
     const pointerVector* currentElementReferences = nullptr;
     //layout engine will set this
     //and it will clear and update this
+    friend class LayoutManager;
 public:
+    void MarkDirty(int id);
     void MarkParentChainDirty(int id);
 };
 
@@ -272,6 +263,7 @@ class LayoutManager{
     //communicate if something was found dirty
     //update layout of "dirty" element
 private:
+    LayoutContext context;
 public:
     bool Run(const TraversalData& traversal, pointerVector& elementPointers, UIStateTables& dataTables);
 };
@@ -318,8 +310,8 @@ private:
     bool initialized = false;
 public:
     void Init();
-    void UploadFrame(const RenderData&);
-    void DrawFrame(const RenderData&);
+    void UploadFrame(const RenderData& frameData);
+    void DrawFrame(const RenderData& frameData, const std::array<float,2>& resolution);
     bool IsInitialized(){
         return initialized;
     }
@@ -329,21 +321,16 @@ class AnchorElement : public UIElement {
 public:
 };
 
-class PaddedElement : public UIElement {
-    public:
-    float padding = 5.0f;
-};
-
-class UIRect : public PaddedElement {
+class UIRect : public UIElement {
 public:
 };
 
-class VerticalContainer : public PaddedElement {
+class VerticalContainer : public UIElement {
 public:
     bool centerHorizontally = true;
     bool resizeChildren = false;
     float r = 0.6f, g = 0.1f, b = 0.8f;
-    void UpdateLayout(UIStateTables& data) override;
+    void UpdateLayout(UIStateTables& data, LayoutContext& context) override;
 };
 
 #endif

@@ -10,7 +10,7 @@ class EBO{
 
         void Bind();
         void Unbind();
-        void Data(GLsizeiptr size, const GLuint *indices);
+        void Data(GLsizeiptr size, const void *indices);
         void Delete();
 };
 
