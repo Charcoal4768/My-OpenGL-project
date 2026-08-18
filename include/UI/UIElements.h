@@ -3,7 +3,6 @@
 
 #include <array>
 #include <cassert>
-#include <glad/glad.h>
 #include <memory>
 #include <openglBasics/EBO.h>
 #include <openglBasics/VAO.h>
@@ -12,6 +11,13 @@
 #include <vector>
 
 // DOES NOT WORK RN, MASSIVE REFACTOR CURRENTLY HAPPENING
+
+class UIElement;
+class LayoutContext;
+class Hierarchy;
+class LayoutManager;
+class RenderBatcher;
+class Renderer;
 
 constexpr float F_UNSET = -1.0f;
 constexpr int I_UNSET = -1;
@@ -144,6 +150,102 @@ class UIElement {
     virtual void UpdateLayout(UIStateTables &data, LayoutContext &context);
 };
 
+class LayoutContext {
+  private:
+    const pointerVector *currentElementReferences = nullptr;
+    // layout engine will set this
+    // and it will clear and update this
+    friend class LayoutManager;
+
+  public:
+    void MarkDirty(int id);
+    void MarkParentChainDirty(int id);
+};
+
+class Hierarchy {
+  private:
+    TraversalData traversal;
+    const pointerVector *currentElementReferences = nullptr;
+    int rootId = I_UNSET;
+
+  public:
+    bool hirearchyDirty = true;
+    const TraversalData &RebuildTraversal(pointerVector &elementPointers);
+    const TraversalData &ReturnCurrentTraversal() const;
+    void RecursiveDownTraversal(int elementId);
+    void RecursiveUpTraversal(int elementId);
+    void SetRoot(int id);
+    // access treversal without needing to rebuild
+};
+
+class LayoutManager {
+    // manage abs pos and layout
+    // take ptrStore to chase pointers...
+    // set abs positions from locals
+    // communicate if something was found dirty
+    // update layout of "dirty" element
+  private:
+    LayoutContext context;
+    int rootId = I_UNSET;
+
+  public:
+    bool Run(const TraversalData &traversal, pointerVector &elementPointers,
+             UIStateTables &dataTables);
+    void SetRoot(int id);
+};
+
+class RenderBatcher {
+  private:
+    RenderData FrameData;
+
+  public:
+    const RenderData &ReBuildFrameData(UIStateTables &dataTables,
+                                       const std::vector<RenderOp> &displayList,
+                                       float viewportHeight);
+    const RenderData &GetFrameData() const;
+    // prepare Verticies, indicies, cmd list
+};
+
+class Renderer {
+    // only one aware of opengl
+  private:
+    VAO MainVAO;
+    VBO MainVBO;
+    EBO MainEBO;
+    Shader DefaultShader;
+    GLint resolutionUniform = I_UNSET;
+    // 0th layout: 3 floats each
+    // not normalized, 7 floats apart
+    // 0 offset from the start
+    Layout VertexLayout = {0,
+                           3,
+                           GL_FLOAT,
+                           GL_FALSE,
+                           7 * sizeof(float),
+                           static_cast<uintptr_t>(0 * sizeof(float))};
+    // 1st layout: 4 floats each
+    // not normalized, 7 floats apart
+    // 3 offset from the start
+    Layout FragmentLayout = {1,
+                             4,
+                             GL_FLOAT,
+                             GL_FALSE,
+                             7 * sizeof(float),
+                             static_cast<uintptr_t>(3 * sizeof(float))};
+    bool initialized = false;
+
+  public:
+    void Init();
+    void UploadFrame(const RenderData &frameData);
+    void DrawFrame(const std::vector<DrawCommand> &commandsData,
+                   const std::array<float, 2> &resolution);
+    bool IsInitialized() { return initialized; }
+};
+
+class AnchorElement : public UIElement {
+  public:
+};
+
 class UIScene {
   private:
     pointerVector ptrStore;
@@ -230,7 +332,7 @@ class UIScene {
         elementAppearance.minWidth = F_UNSET;
 
         dataTables.geometry.push_back(elementShape);
-        dataTables.style.push_back(elementColor);
+        dataTables.style.push_back(elementAppearance);
         return newID;
     }
 
@@ -240,89 +342,6 @@ class UIScene {
         assert(ptr != nullptr);
         return *ptr;
     }
-};
-
-class Hierarchy {
-  private:
-    TraversalData traversal;
-    const pointerVector *currentElementReferences = nullptr;
-    int rootId = I_UNSET;
-
-  public:
-    bool hirearchyDirty = true;
-    const TraversalData &RebuildTraversal(pointerVector &elementPointers);
-    const TraversalData &ReturnCurrentTraversal() const;
-    void RecursiveDownTraversal(int elementId);
-    void RecursiveUpTraversal(int elementId);
-    // access treversal without needing to rebuild
-};
-
-class LayoutContext {
-  private:
-    const pointerVector *currentElementReferences = nullptr;
-    // layout engine will set this
-    // and it will clear and update this
-    friend class LayoutManager;
-
-  public:
-    void MarkDirty(int id);
-    void MarkParentChainDirty(int id);
-};
-
-class LayoutManager {
-    // manage abs pos and layout
-    // take ptrStore to chase pointers...
-    // set abs positions from locals
-    // communicate if something was found dirty
-    // update layout of "dirty" element
-  private:
-    LayoutContext context;
-
-  public:
-    bool Run(const TraversalData &traversal, pointerVector &elementPointers,
-             UIStateTables &dataTables);
-};
-
-class RenderBatcher {
-  private:
-    RenderData FrameData;
-
-  public:
-    const RenderData &ReBuildFrameData(UIStateTables &dataTables,
-                                       const std::vector<RenderOp> &displayList,
-                                       float viewportHeight);
-    const RenderData &GetFrameData() const;
-    // prepare Verticies, indicies, cmd list
-};
-
-class Renderer {
-    // only one aware of opengl
-  private:
-    VAO MainVAO;
-    VBO MainVBO;
-    EBO MainEBO;
-    Shader DefaultShader;
-    GLint resolutionUniform = I_UNSET;
-    // 0th layout: 3 floats each
-    // not normalized, 7 floats apart
-    // 0 offset from the start
-    Layout VertexLayout = {0, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), 0};
-    // 1st layout: 4 floats each
-    // not normalized, 7 floats apart
-    // 3 offset from the start
-    Layout FragmentLayout = {1, 4, GL_FLOAT, GL_FALSE, 7 * sizeof(float), 3};
-    bool initialized = false;
-
-  public:
-    void Init();
-    void UploadFrame(const RenderData &frameData);
-    void DrawFrame(const std::vector<DrawCommand> &commandsData,
-                   const std::array<float, 2> &resolution);
-    bool IsInitialized() { return initialized; }
-};
-
-class AnchorElement : public UIElement {
-  public:
 };
 
 class UIRect : public UIElement {

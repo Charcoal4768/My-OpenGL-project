@@ -2,7 +2,6 @@
 #define VAO_CLASS_H
 
 #include "openglBasics/VBO.h"
-#include <glad/glad.h>
 
 struct Layout {
     GLuint index;
@@ -10,7 +9,7 @@ struct Layout {
     GLenum type;
     GLboolean normalized;
     GLsizeiptr stride;
-    GLsizei offset;
+    uintptr_t offset;
 };
 
 class VAO {
@@ -19,7 +18,7 @@ class VAO {
     VAO() = default;
 
     // links a VBO to the VAO
-    void LinkAttrib(VBO VBO, Layout newLayout);
+    void LinkAttrib(VBO &VBO, Layout newLayout);
     void Bind();
     void Unbind();
     void Delete();

@@ -38,9 +38,9 @@ std::array<float, 2> ApplyStyle(float computedWidth, float computedHeight,
                           ? (style.prefferedHeightPercent * parentHeight)
                           : computedHeight;
 
-    if (style.maxWidth >= F_UNSET)
+    if (style.maxWidth != F_UNSET)
         prefferedWidth = std::min(prefferedWidth, style.maxWidth);
-    if (style.maxHeight >= F_UNSET)
+    if (style.maxHeight != F_UNSET)
         prefferedHeight = std::min(prefferedHeight, style.maxHeight);
 
     float finalWidth = prefferedWidth;
@@ -64,19 +64,30 @@ bool LayoutManager::Run(const TraversalData &traversal,
         return rebuildRender;
     context.currentElementReferences = &elementPointers;
     for (int elementId : traversal.drawOrder) {
-        int parentId = traversal.parentIdLookup[elementId];
-        if (parentId == I_UNSET)
+        int parentId = (elementId < traversal.parentIdLookup.size())
+                           ? traversal.parentIdLookup[elementId]
+                           : I_UNSET;
+        if (parentId == I_UNSET && (elementId != rootId))
             continue;
         UIElement *el = elementPointers[elementId].get();
         if (!el)
             continue;
-        GeometryStoreState &elementShape = dataTables.geometry[elementId];
-        GeometryStoreState &parentShape = dataTables.geometry[parentId];
-        elementShape.absoluteX = parentShape.absoluteX + elementShape.localX;
-        elementShape.absoluteY = parentShape.absoluteY + elementShape.localY;
         if (el->isDirty) {
             el->UpdateLayout(dataTables, context);
             rebuildRender = true; // render commands need to be rebuilt
+        }
+        GeometryStoreState &elementShape = dataTables.geometry[elementId];
+        if (parentId != I_UNSET) {
+            GeometryStoreState &parentShape = dataTables.geometry[parentId];
+            elementShape.absoluteX =
+                parentShape.absoluteX + elementShape.localX;
+            elementShape.absoluteY =
+                parentShape.absoluteY + elementShape.localY;
+        } else {
+            elementShape.absoluteX =
+                elementShape.localX != F_UNSET ? elementShape.localX : 0.0f;
+            elementShape.absoluteY =
+                elementShape.localY != F_UNSET ? elementShape.localY : 0.0f;
         }
     }
     context.currentElementReferences = nullptr;
@@ -131,7 +142,16 @@ void UIScene::SetRoot(int id) {
                             // it was then id automatically is valid and > -1
     assert(ptr->parentId == -1); // root cannot have a parent
     rootId = id;
+    MainHierarchy.SetRoot(id);
+    MainLayout.SetRoot(id);
 }
+
+void Hierarchy::SetRoot(int id) {
+    rootId = id;
+    hirearchyDirty = true;
+}
+
+void LayoutManager::SetRoot(int id) { rootId = id; }
 
 void UIScene::EditElementShape(int id, const GeometryStoreState &newShape,
                                bool dirtyChain) {
@@ -151,8 +171,8 @@ void UIScene::EditElementShape(int id, const GeometryStoreState &newShape,
         return;
 
     elementShape = newShape;
-    elementShape.absoluteX = oldAbsX;
-    elementShape.absoluteY = oldAbsY;
+    // elementShape.absoluteX = oldAbsX;
+    // elementShape.absoluteY = oldAbsY;
 
     if (dirtyChain) {
         el->isDirty = true;
@@ -214,6 +234,15 @@ Hierarchy::RebuildTraversal(pointerVector &elementPointers) {
     if (currentElementReferences == nullptr)
         return traversal;
 
+    if (rootId < 0 || rootId >= currentElementReferences->size() ||
+        !(*currentElementReferences)[rootId]) {
+        std::cout << "ERROR: Invalid rootId (" << rootId
+                  << ") in Hierarchy::RebuildTraversal!" << std::endl;
+        hirearchyDirty = false;
+        currentElementReferences = nullptr;
+        return traversal;
+    }
+
     size_t targetCapacity = currentElementReferences->size() * 3 / 2;
 
     if (!currentElementReferences->empty() &&
@@ -261,7 +290,7 @@ void Hierarchy::RecursiveDownTraversal(int elementId) {
     bool useScissor = el->clipChildren;
     int parentId = el->parentId;
 
-    if (parentId == I_UNSET)
+    if (parentId == I_UNSET && (elementId != rootId))
         return;
 
     if (useScissor) {
@@ -281,6 +310,8 @@ void Hierarchy::RecursiveDownTraversal(int elementId) {
         if (elementId >= traversal.parentIdLookup.size()) {
             traversal.parentIdLookup.resize(elementId + 1, I_UNSET);
         }
+        traversal.parentIdLookup[elementId] = parentId;
+        std::cout << elementId << "=" << parentId << std::endl;
     }
 
     for (int childId : el->childIds) {
@@ -297,6 +328,7 @@ void UIScene::Init() {
     // set Renderer honestly for now, nothing else...
     if (!MainRenderer.IsInitialized())
         MainRenderer.Init();
+    MainHierarchy.hirearchyDirty = true;
 }
 
 void UIScene::AddChild(int parentId, int childId) {
@@ -356,15 +388,16 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
 
     TraversalData frameTraversalData;
     if (MainHierarchy.hirearchyDirty == true) {
-        frameTraversalData =
-            MainHierarchy.RebuildTraversal(ptrStore); // const...
+        frameTraversalData = MainHierarchy.RebuildTraversal(ptrStore);
+        std::cout << "Building Traversal" << std::endl;
     } else {
         frameTraversalData = MainHierarchy.ReturnCurrentTraversal();
+        std::cout << "Skipping Traversal" << std::endl;
     }
 
     const TraversalData &currentTraversalData = frameTraversalData;
     if (currentTraversalData.empty()) {
-        // scene is empty
+        std::cout << "Scene Empty" << std::endl;
         return;
     }
 
@@ -375,17 +408,60 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
     if (frameGraphicalData.empty() || rebuildFrameData) {
         frameGraphicalData = MainBatcher.ReBuildFrameData(
             dataTables, currentTraversalData.displayList, resolution[1]);
+        std::cout << "Rebuilding Frame" << std::endl;
     }
 
     const RenderData &currentGraphicalData = frameGraphicalData;
     if (currentGraphicalData.empty()) {
-        // nothing to draw
+        std::cout << "Data Empty" << std::endl;
         return;
     }
 
     if (!MainRenderer.IsInitialized())
         MainRenderer.Init();
 
+    std::cout << "Vertices: " << currentGraphicalData.vertices.size()
+              << " | Indices: " << currentGraphicalData.indices.size()
+              << " | Commands: " << currentGraphicalData.commands.size()
+              << std::endl;
+
+    // 1. Print Vertices
+    std::cout << "\n=== Vertices (" << currentGraphicalData.vertices.size()
+              << ") ===" << std::endl;
+    for (size_t i = 0; i < currentGraphicalData.vertices.size(); ++i) {
+        const auto &v = currentGraphicalData.vertices[i];
+        std::cout << "  Vertex [" << i << "]: "
+                  << "Pos(" << v.pos[0] << ", " << v.pos[1] << ", " << v.pos[2]
+                  << ") | "
+                  << "Color(" << v.color[0] << ", " << v.color[1] << ", "
+                  << v.color[2] << ", " << v.color[3] << ")\n";
+    }
+
+    // 2. Print Indices
+    std::cout << "\n=== Indices (" << currentGraphicalData.indices.size()
+              << ") ===" << std::endl;
+    for (size_t i = 0; i < currentGraphicalData.indices.size(); ++i) {
+        std::cout << "  Index [" << i
+                  << "]: " << currentGraphicalData.indices[i] << "\n";
+    }
+
+    // 3. Print Draw Commands
+    std::cout << "\n=== Draw Commands (" << currentGraphicalData.commands.size()
+              << ") ===" << std::endl;
+    for (size_t i = 0; i < currentGraphicalData.commands.size(); ++i) {
+        const auto &cmd = currentGraphicalData.commands[i];
+        std::cout << "  Command [" << i << "]: "
+                  << "Index Offset: " << cmd.indexOffset
+                  << " | Index Count: " << cmd.indexCount
+                  << " | Use Scissor: " << (cmd.useScissor ? "true" : "false");
+        if (cmd.useScissor) {
+            std::cout << " | ScissorBox (x: " << cmd.scissorBox.x
+                      << ", y: " << cmd.scissorBox.y
+                      << ", w: " << cmd.scissorBox.w
+                      << ", h: " << cmd.scissorBox.h << ")";
+        }
+        std::cout << "\n";
+    }
     MainRenderer.UploadFrame(currentGraphicalData);
     MainRenderer.DrawFrame(currentGraphicalData.commands, resolution);
 }
