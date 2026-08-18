@@ -69,6 +69,13 @@ struct RenderData
     std::vector<Vertex> vertices;
     std::vector<GLuint> indices;
     std::vector<DrawCommand> commands;
+    bool empty() const{
+        return (
+            vertices.empty() ||
+            indices.empty() ||
+            commands.empty()
+        );
+    }
 };
 
 struct TraversalData
@@ -155,13 +162,13 @@ private:
     pointerVector ptrStore;
     UIStateTables dataTables;
 
-    bool hirearchyDirty = true;
     bool frameDataRebuild = true;
     int rootId = I_UNSET;
 
-    std::vector<Vertex> globalVertices;
-    std::vector<GLuint> globalIndices;
-    std::vector<DrawCommand> drawCommands;
+    Hierarchy MainHierarchy;
+    LayoutManager MainLayout;
+    RenderBatcher MainBatcher;
+    Renderer MainRenderer;
 
 public:
     int defaultCapacity = 100; //for ptrStore
@@ -173,13 +180,12 @@ public:
     void SetRoot(int id);
     void EditElementShape(int id, const GeometryStoreState& props, bool dirtyChain);
     void EditElementColor(int id, const Color& props, bool dirtyChain);
-    void StepFrame(std::array<float, 2>& resolution);//first element will always be the root make it the size of resolution
+    void StepFrame(std::array<float, 2>& resolution);
     void AddChild(int parentId, int childId);
     void RemoveChild(int childId);
-    void RebuildHierarchy();
     void SetRootViewport(float width, float height);
 
-    UIElement* GetElement(int id) const;
+    // UIElement* GetElement(int id) const;
     const GeometryStoreState& GetElementShape(int id) const;
     const StyleStoreState& GetElementStyle(int id) const;
     
@@ -202,7 +208,7 @@ public:
         ptrStore.push_back(std::move(element));
 
         GeometryStoreState elementShape;
-        Color elementColor;
+        StyleStoreState elementAppearance;
 
         elementShape.localX = F_UNSET;
         elementShape.localY = F_UNSET;
@@ -212,13 +218,18 @@ public:
         elementShape.absoluteX = 0.0f;
         elementShape.absoluteY = 0.0f;
 
-        elementColor.r = 1.0f;
-        elementColor.g = 1.0f;
-        elementColor.b = 1.0f;
-        elementColor.a = 1.0f;
+        elementAppearance.color.r = 1.0f;
+        elementAppearance.color.g = 1.0f;
+        elementAppearance.color.b = 1.0f;
+        elementAppearance.color.a = 1.0f;
+        elementAppearance.hidden = false;
+        elementAppearance.maxHeight = F_UNSET;
+        elementAppearance.maxWidth = F_UNSET;
+        elementAppearance.minHeight = F_UNSET;
+        elementAppearance.minWidth = F_UNSET;
 
         dataTables.geometry.push_back(elementShape);
-        dataTables.geometry.push_back(elementColor);
+        dataTables.style.push_back(elementColor);
         return newID;
     }
 
@@ -311,7 +322,7 @@ private:
 public:
     void Init();
     void UploadFrame(const RenderData& frameData);
-    void DrawFrame(const RenderData& frameData, const std::array<float,2>& resolution);
+    void DrawFrame(const std::vector<DrawCommand>& commandsData, const std::array<float,2>& resolution);
     bool IsInitialized(){
         return initialized;
     }

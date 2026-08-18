@@ -5,21 +5,19 @@
 #include <iostream>
 
 void UIScene::SetRootViewport(float width, float height){
+    //meant to be called by
+    //the StepFrame function at the very start
     viewportWidth = width;
     viewportHeight = height;
-//we just store the new size data
-//we let StepFrame handle the checks
-//and comparisons and setting bools and stuff
-//this old stuff:
-// if (!ptrStore.empty() && ptrStore[rootId]) { //sync UI root to window size
-//     GeometryStoreState& rootShape = dataTables.geometry[rootId];
-//     if (rootShape.width != newWidth || rootShape.height != newHeight) {
-//         rootShape.width = newWidth;
-//         rootShape.height = newHeight;
-//         ptrStore[rootId]->isDirty = true; 
-//         frameDataRebuild = true;
-//     }
-// }
+    if (!ptrStore.empty() && ptrStore[rootId]) { //sync UI root to window size
+        GeometryStoreState& rootShape = dataTables.geometry[rootId];
+        if (rootShape.width != width || rootShape.height != height) {
+            rootShape.width = width;
+            rootShape.height = height;
+            ptrStore[rootId]->isDirty = true; 
+            frameDataRebuild = true;
+        }
+    }
 }
 
 std::array<float,2> ApplyStyle(float computedWidth, float computedHeight, 
@@ -66,7 +64,7 @@ pointerVector& elementPointers, UIStateTables& dataTables){
         elementShape.absoluteY = parentShape.absoluteY + elementShape.localY;
         if (el->isDirty)
         {
-            el->UpdateLayout(dataTables);
+            el->UpdateLayout(dataTables, context);
             rebuildRender = true; //render commands need to be rebuilt
         }        
     }
@@ -269,7 +267,11 @@ void Hierarchy::RecursiveDownTraversal(int elementId){
     
 }
 
-
+void UIScene::Init(){
+    //what do i do here?
+    //set Renderer honestly for now, nothing else...
+    if (!MainRenderer.IsInitialized()) MainRenderer.Init();
+}
 
 void UIScene::AddChild(int parentId, int childId) {
     if (parentId < 0 || parentId >= ptrStore.size() || !ptrStore[parentId]) return;
@@ -281,7 +283,7 @@ void UIScene::AddChild(int parentId, int childId) {
     parent->childIds.push_back(child->id);
     child->parentId = parent->id;
     parent->isDirty = true;
-    hirearchyDirty = true; //gonna make this something that takes
+    MainHierarchy.hirearchyDirty = true; //gonna make this something that takes
     //element ID which triggered rebuild
     //into account
 }
@@ -291,7 +293,7 @@ void UIScene::RemoveChild(int childId) {
     UIElement* child = ptrStore[childId].get();
     int parentId = child->parentId;
     if (parentId < 0 || parentId >= ptrStore.size() || !ptrStore[parentId]) return;
-    UIElement* parent = ptrStore[childId].get();
+    UIElement* parent = ptrStore[parentId].get();
     std::vector<int>& childIds = parent->childIds;
     auto it = std::find(childIds.begin(), childIds.end(), childId);
 
@@ -300,7 +302,7 @@ void UIScene::RemoveChild(int childId) {
         std::swap(childIds[index], childIds.back());
         childIds.pop_back();
     }
-    hirearchyDirty = true;
+    MainHierarchy.hirearchyDirty = true;
 }
 
 void UIElement::UpdateLayout(UIStateTables& data, LayoutContext& context) {
@@ -312,8 +314,49 @@ ScreenLayoutMode UIScene::GetScreenLayoutMode() const{
     return ScreenLayoutMode::Desktop;
 }
 
+//set root element to resolution size
+//check if hirearchy is dirty (hirearchy will tell us) then rebuild
+//regardless of wether or not its rebuilt, if hirearchy traversal data exists
+//then use it for layout
+//then use it for batching and draw command creation
+//parse the commands and render the frame data
 void UIScene::StepFrame(std::array<float,2>& resolution){
 
+    SetRootViewport(resolution[0],resolution[1]);
+
+    TraversalData frameTraversalData;
+    if (MainHierarchy.hirearchyDirty == true){
+        frameTraversalData = MainHierarchy.RebuildTraversal(ptrStore); //const...
+    } else {
+        frameTraversalData = MainHierarchy.ReturnCurrentTraversal();
+    }
+
+    const TraversalData& currentTraversalData = frameTraversalData;
+    if (currentTraversalData.empty())
+    {
+        //scene is empty
+        return;
+    }
+    
+    bool rebuildFrameData = MainLayout.Run(currentTraversalData, ptrStore, dataTables);
+
+    RenderData frameGraphicalData = MainBatcher.GetFrameData();
+    if (frameGraphicalData.empty() || rebuildFrameData)
+    {
+        frameGraphicalData = MainBatcher.ReBuildFrameData(dataTables, currentTraversalData.displayList, resolution[1]);
+    }
+
+    const RenderData& currentGraphicalData = frameGraphicalData;
+    if (currentGraphicalData.empty())
+    {
+        //nothing to draw
+        return;
+    }
+    
+    if (!MainRenderer.IsInitialized()) MainRenderer.Init();
+
+    MainRenderer.UploadFrame(currentGraphicalData);
+    MainRenderer.DrawFrame(currentGraphicalData.commands, resolution);
 }
 
 static void AppendQuad(
@@ -455,20 +498,22 @@ void Renderer::Init(){
     initialized = true;
 }
 
-void Renderer::DrawFrame(const RenderData& frameData, const std::array<float,2>& resolution){
+void Renderer::DrawFrame(const std::vector<DrawCommand>& commandsData, const std::array<float,2>& resolution){
     if (!initialized){
         std::cout << "WARNING: RENDERER NOT INITIALIZED BUT Renderer::DrawFrame() WAS CALLED" << std::endl; 
         return;
     }
     DefaultShader.Activate();
 	glUniform2f(resolutionUniform, static_cast<float>(resolution[0]), static_cast<float>(resolution[1]));
+
     if (resolutionUniform == -1)
     {
         std::cout << "WARNING: u_resolution uniform not found." << std::endl;
     }
+
     MainVAO.Bind();
 
-    for (const DrawCommand& cmd : frameData.commands){
+    for (const DrawCommand& cmd : commandsData){
 		if (cmd.indexCount == 0) continue;
 		if (cmd.useScissor) {
 			glEnable(GL_SCISSOR_TEST);
@@ -483,6 +528,7 @@ void Renderer::DrawFrame(const RenderData& frameData, const std::array<float,2>&
 			(void*)(cmd.indexOffset * sizeof(GLuint))
 		);
     }
+
     glDisable(GL_SCISSOR_TEST);
     MainVAO.Unbind();
 }
@@ -506,8 +552,6 @@ void VerticalContainer::UpdateLayout(UIStateTables& data, LayoutContext& context
         return;
     }
 
-    GeometryStoreState& myData = data.geometry[id];
-
     float targetX = 0, targetY = padding;
     float childLargestWidth = 0.0f;
 
@@ -515,6 +559,7 @@ void VerticalContainer::UpdateLayout(UIStateTables& data, LayoutContext& context
         GeometryStoreState& childData = data.geometry[childId];
         StyleStoreState& childstyle = data.style[childId];
         if (resizeChildren){
+            GeometryStoreState& myData = data.geometry[id];
             float bigger = std::max(childData.width, childData.height);
             auto size = ApplyStyle(bigger, bigger, myData.width, myData.height, childstyle);
             childData.width = size[0];
@@ -525,36 +570,43 @@ void VerticalContainer::UpdateLayout(UIStateTables& data, LayoutContext& context
 
     if (fitContentWidth){
         float fitWidth = childLargestWidth + 2 * padding;
-        myData.width = std::max(myData.width, fitWidth);
-        UIScene->EditElement(this->id, myData, false);
+        float oldWidth = data.geometry[id].width;
+
+        data.geometry[id].width = std::max(oldWidth, fitWidth);
+
+        if (data.geometry[id].width != oldWidth)
+            context.MarkParentChainDirty(id);
     }
 
     for (int childId : childIds){
-        GeometryStoreState& childData = data.geometry[childId];
         if(centerHorizontally){
-            targetX = (myData.width - childData.width) * 0.5f;
+            targetX = (data.geometry[id].width - data.geometry[childId].width) * 0.5f;
         } else{
             targetX = padding;
         }
 
-        float oldChildX = childData.localX;
-        float oldChildY = childData.localY;
+        float oldChildX = data.geometry[childId].localX;
+        float oldChildY = data.geometry[childId].localY;
 
-        childData.localX = targetX;
-        childData.localY = targetY;
+        data.geometry[childId].localX = targetX;
+        data.geometry[childId].localY = targetY;
 
-        if (oldChildX != childData.localX ||
-            oldChildY != childData.localY)
+        if (oldChildX != data.geometry[childId].localX ||
+            oldChildY != data.geometry[childId].localY)
         {
             context.MarkDirty(childId);
         }
 
-        targetY += padding + childData.height;
+        targetY += padding + data.geometry[childId].height;
     }
 
     if (fitContentHeight){
-        myData.height = targetY;
-        UIScene->EditElement(this->id, myData, false);
+        float oldHeight = data.geometry[id].height;
+        data.geometry[id].height = targetY;
+        if (data.geometry[id].height != oldHeight)
+        {
+            context.MarkParentChainDirty(id);
+        }
     }
     
     isDirty = false;
