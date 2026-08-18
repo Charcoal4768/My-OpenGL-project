@@ -1,10 +1,10 @@
 #ifndef VAO_CLASS_H
 #define VAO_CLASS_H
 
-#include<glad/glad.h>
-#include"openglBasics/VBO.h"
+#include "openglBasics/VBO.h"
+#include <glad/glad.h>
 
-struct Layout{
+struct Layout {
     GLuint index;
     GLuint componentCount;
     GLenum type;
@@ -13,16 +13,16 @@ struct Layout{
     GLsizei offset;
 };
 
-class VAO{
-    public:
-        GLuint ID;
-        VAO() = default;
+class VAO {
+  public:
+    GLuint ID;
+    VAO() = default;
 
-        //links a VBO to the VAO
-        void LinkAttrib(VBO VBO, Layout newLayout);
-        void Bind();
-        void Unbind();
-        void Delete();
+    // links a VBO to the VAO
+    void LinkAttrib(VBO VBO, Layout newLayout);
+    void Bind();
+    void Unbind();
+    void Delete();
 };
 
 #endif
