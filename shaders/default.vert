@@ -5,7 +5,7 @@ layout (location = 0) in vec3 aPos; //tell our shader
 //there is a vec3 called aPos on layout location 0
 
 layout (location = 1) in vec4 aColor;
-//tell our shader there is a vec3 in layout location 1
+//tell our shader there is a vec4 in layout location 1
 //called aColor (right next to aPos)
 
 out vec4 color; //output the color from the
