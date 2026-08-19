@@ -147,7 +147,7 @@ class UIElement {
 
     virtual ~UIElement() = default;
 
-    virtual void UpdateLayout(UIStateTables &data, LayoutContext &context);
+    virtual bool UpdateLayout(UIStateTables &data, LayoutContext &context);
 };
 
 class LayoutContext {
@@ -186,11 +186,12 @@ class LayoutManager {
     // communicate if something was found dirty
     // update layout of "dirty" element
   private:
-    LayoutContext context;
     int rootId = I_UNSET;
     bool debug = false;
+    // bool initialized = false;
 
   public:
+    LayoutContext context;
     bool Run(const TraversalData &traversal, pointerVector &elementPointers,
              UIStateTables &dataTables);
     void SetRoot(int id);
@@ -276,6 +277,8 @@ class UIScene {
     void Init();
     void SetDebug(bool enabled);
     void SetRoot(int id);
+    void MarkDirty(int id);
+    void MarkParentChainDirty(int id);
     void EditElementShape(int id, const GeometryStoreState &props,
                           bool dirtyChain);
     void EditElementColor(int id, const Color &props, bool dirtyChain);
@@ -362,7 +365,7 @@ class VerticalContainer : public UIElement {
     bool centerHorizontally = true;
     bool resizeChildren = false;
     float r = 0.6f, g = 0.1f, b = 0.8f;
-    void UpdateLayout(UIStateTables &data, LayoutContext &context) override;
+    bool UpdateLayout(UIStateTables &data, LayoutContext &context) override;
 };
 
 #endif

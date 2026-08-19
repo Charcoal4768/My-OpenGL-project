@@ -1,3 +1,7 @@
+// THIS FILE IS JUST A TEST/DEMO.
+// THIS IS NOT PART OF THE UI ENGINE
+// THIS FILE IS ONLY A DEMONSTRATION OF THE ENGINE's CAPABILITIES
+
 #include <UI/UIElements.h> //includes glad.h
 
 #include <GLFW/glfw3.h>

@@ -56,6 +56,17 @@ std::array<float, 2> ApplyStyle(float computedWidth, float computedHeight,
     return {finalWidth, finalHeight};
 }
 
+// void LayoutManager::Init(pointerVector &elementPointers) {
+//     // assert(elementPointers.back() != nullptr);
+//     if (initialized == true) {
+//         std::cout << "WARNING:: Layout Manager Initialized when references"
+//                      " already populated"
+//                   << std::endl;
+//         return;
+//     }
+//     context.currentElementReferences = &elementPointers;
+// }
+
 bool LayoutManager::Run(const TraversalData &traversal,
                         pointerVector &elementPointers,
                         UIStateTables &dataTables) {
@@ -73,8 +84,9 @@ bool LayoutManager::Run(const TraversalData &traversal,
         if (!el)
             continue;
         if (el->isDirty) {
-            el->UpdateLayout(dataTables, context);
-            rebuildRender = true; // render commands need to be rebuilt
+            if (el->UpdateLayout(dataTables, context) && (el->id != rootId)) {
+                rebuildRender = true; // render commands need to be rebuilt
+            }
         }
         GeometryStoreState &elementShape = dataTables.geometry[elementId];
         if (parentId != I_UNSET) {
@@ -92,6 +104,36 @@ bool LayoutManager::Run(const TraversalData &traversal,
     }
     context.currentElementReferences = nullptr;
     return rebuildRender;
+}
+
+void UIScene::MarkDirty(int id) {
+    assert(ptrStore.back() != nullptr);
+    if (id == I_UNSET || id >= ptrStore.size())
+        return;
+
+    UIElement *el = ptrStore[id].get();
+    if (el)
+        el->isDirty = true;
+}
+
+void UIScene::MarkParentChainDirty(int elementId) {
+    assert(ptrStore.back() != nullptr);
+
+    if (elementId == I_UNSET || elementId >= ptrStore.size())
+        return;
+
+    UIElement *el = ptrStore[elementId].get();
+
+    if (!el)
+        return;
+
+    int parentId = el->parentId;
+    el->isDirty = true;
+
+    if (parentId == I_UNSET)
+        return;
+
+    MarkParentChainDirty(parentId);
 }
 
 void LayoutContext::MarkDirty(int id) {
@@ -162,9 +204,6 @@ void UIScene::EditElementShape(int id, const GeometryStoreState &newShape,
 
     GeometryStoreState &elementShape = dataTables.geometry[id];
 
-    float oldAbsX = elementShape.absoluteX;
-    float oldAbsY = elementShape.absoluteY;
-
     bool positionOrSizeChanged = (elementShape != newShape);
 
     if (!positionOrSizeChanged)
@@ -177,7 +216,7 @@ void UIScene::EditElementShape(int id, const GeometryStoreState &newShape,
     if (dirtyChain) {
         el->isDirty = true;
         if (el->parentId != -1 && ptrStore[el->parentId]) {
-            ptrStore[el->parentId]->isDirty = true; // Mark parent dirty
+            MarkParentChainDirty(id);
         }
     }
 }
@@ -201,7 +240,7 @@ void UIScene::EditElementColor(int id, const Color &newColor, bool dirtyChain) {
     if (dirtyChain && colorChanged) {
         el->isDirty = true;
         if (el->parentId != -1 && ptrStore[el->parentId]) {
-            ptrStore[el->parentId]->isDirty = true; // Mark parent dirty
+            MarkParentChainDirty(id);
         }
     }
 }
@@ -331,6 +370,7 @@ void UIScene::Init() {
     // set Renderer honestly for now, nothing else...
     if (!MainRenderer.IsInitialized())
         MainRenderer.Init();
+
     MainHierarchy.hirearchyDirty = true;
 }
 
@@ -384,8 +424,10 @@ void UIScene::RemoveChild(int childId) {
     MainHierarchy.hirearchyDirty = true;
 }
 
-void UIElement::UpdateLayout(UIStateTables &data, LayoutContext &context) {
+bool UIElement::UpdateLayout(UIStateTables &data, LayoutContext &context) {
+    bool changed = false;
     isDirty = false;
+    return changed;
 }
 
 ScreenLayoutMode UIScene::GetScreenLayoutMode() const {
@@ -425,11 +467,14 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
         MainLayout.Run(currentTraversalData, ptrStore, dataTables);
 
     RenderData frameGraphicalData = MainBatcher.GetFrameData();
-    if (frameGraphicalData.empty() || rebuildFrameData) {
+    bool dataEmpty = frameGraphicalData.empty();
+    if (dataEmpty || rebuildFrameData) {
         frameGraphicalData = MainBatcher.ReBuildFrameData(
             dataTables, currentTraversalData.displayList, resolution[1]);
         if (debug)
-            std::cout << "Rebuilding Frame" << std::endl;
+            std::cout << "Rebuilding Frame" << "| Layout dirty |"
+                      << rebuildFrameData << "| Data Empty | " << dataEmpty
+                      << std::endl;
     }
 
     const RenderData &currentGraphicalData = frameGraphicalData;
@@ -687,11 +732,13 @@ void Renderer::UploadFrame(const RenderData &frameData) {
     MainEBO.Unbind();
 }
 
-void VerticalContainer::UpdateLayout(UIStateTables &data,
+bool VerticalContainer::UpdateLayout(UIStateTables &data,
                                      LayoutContext &context) {
+    bool changed = false;
+
     if (childIds.empty()) {
         isDirty = false;
-        return;
+        return changed;
     }
 
     float targetX = 0, targetY = padding;
@@ -717,8 +764,10 @@ void VerticalContainer::UpdateLayout(UIStateTables &data,
 
         data.geometry[id].width = std::max(oldWidth, fitWidth);
 
-        if (data.geometry[id].width != oldWidth)
+        if (data.geometry[id].width != oldWidth) {
             context.MarkParentChainDirty(id);
+            changed = true;
+        }
     }
 
     for (int childId : childIds) {
@@ -738,6 +787,7 @@ void VerticalContainer::UpdateLayout(UIStateTables &data,
         if (oldChildX != data.geometry[childId].localX ||
             oldChildY != data.geometry[childId].localY) {
             context.MarkDirty(childId);
+            changed = true;
         }
 
         targetY += padding + data.geometry[childId].height;
@@ -748,12 +798,14 @@ void VerticalContainer::UpdateLayout(UIStateTables &data,
         data.geometry[id].height = targetY;
         if (data.geometry[id].height != oldHeight) {
             context.MarkParentChainDirty(id);
+            changed = true;
         }
     }
 
     isDirty = false;
+    return changed;
 }
 // goal: split UI manager
 // give UpdateLayout access to *LayoutManager instead of
 // the entire UIScene
-//
+// GOAL COMPLETELED!!!
