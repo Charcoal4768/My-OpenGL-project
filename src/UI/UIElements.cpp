@@ -31,12 +31,16 @@ std::array<float, 2> ApplyStyle(float computedWidth, float computedHeight,
     float prefferedWidth;
     float prefferedHeight;
 
-    prefferedWidth = (style.prefferedWidthPercent > F_UNSET)
+    prefferedWidth = (style.prefferedWidthPercent != F_UNSET)
                          ? (style.prefferedWidthPercent * parentWidth)
                          : computedWidth;
-    prefferedHeight = (style.prefferedHeightPercent > F_UNSET)
+    prefferedHeight = (style.prefferedHeightPercent != F_UNSET)
                           ? (style.prefferedHeightPercent * parentHeight)
                           : computedHeight;
+
+    // // print preferred size
+    // std::cout << "Preferred Size: " << prefferedWidth << " x "
+    //           << prefferedHeight << '\n';
 
     if (style.maxWidth != F_UNSET)
         prefferedWidth = std::min(prefferedWidth, style.maxWidth);
@@ -68,8 +72,7 @@ std::array<float, 2> ApplyStyle(float computedWidth, float computedHeight,
 // }
 
 bool LayoutManager::Run(const TraversalData &traversal,
-                        pointerVector &elementPointers,
-                        UIStateTables &dataTables) {
+                        pointerVector &elementPointers, UIStateTables &dataTables) {
     bool rebuildRender = false;
     if (elementPointers.back() == nullptr)
         return rebuildRender;
@@ -91,10 +94,8 @@ bool LayoutManager::Run(const TraversalData &traversal,
         GeometryStoreState &elementShape = dataTables.geometry[elementId];
         if (parentId != I_UNSET) {
             GeometryStoreState &parentShape = dataTables.geometry[parentId];
-            elementShape.absoluteX =
-                parentShape.absoluteX + elementShape.localX;
-            elementShape.absoluteY =
-                parentShape.absoluteY + elementShape.localY;
+            elementShape.absoluteX = parentShape.absoluteX + elementShape.localX;
+            elementShape.absoluteY = parentShape.absoluteY + elementShape.localY;
         } else {
             elementShape.absoluteX =
                 elementShape.localX != F_UNSET ? elementShape.localX : 0.0f;
@@ -180,8 +181,8 @@ ScissorRect IntersectRects(const ScissorRect &a, const ScissorRect &b) {
 
 void UIScene::SetRoot(int id) {
     UIElement *ptr = ptrStore[id].get();
-    assert(ptr != nullptr); // checks if AddElement was even called for this, if
-                            // it was then id automatically is valid and > -1
+    assert(ptr != nullptr);      // checks if AddElement was even called for this, if
+                                 // it was then id automatically is valid and > -1
     assert(ptr->parentId == -1); // root cannot have a parent
     rootId = id;
     MainHierarchy.SetRoot(id);
@@ -259,8 +260,7 @@ const StyleStoreState &UIScene::GetElementStyle(int id) const {
     return dataTables.style[id];
 }
 
-const TraversalData &
-Hierarchy::RebuildTraversal(pointerVector &elementPointers) {
+const TraversalData &Hierarchy::RebuildTraversal(pointerVector &elementPointers) {
     // needs access to: ptrStore, rootId
     if (!hirearchyDirty)
         return traversal;
@@ -277,7 +277,7 @@ Hierarchy::RebuildTraversal(pointerVector &elementPointers) {
         !(*currentElementReferences)[rootId]) {
         if (debug)
             std::cout << "ERROR: Invalid rootId (" << rootId
-                      << ") in Hierarchy::RebuildTraversal!" << std::endl;
+                      << ") in Hierarchy::RebuildTraversal!" << '\n';
         hirearchyDirty = false;
         currentElementReferences = nullptr;
         return traversal;
@@ -310,7 +310,7 @@ const TraversalData &Hierarchy::ReturnCurrentTraversal() const {
             std::cout
                 << "WARNING: Traversal Data has not yet been generated but was "
                    "still requested."
-                << std::endl;
+                << '\n';
     }
     return traversal;
 }
@@ -353,7 +353,7 @@ void Hierarchy::RecursiveDownTraversal(int elementId) {
         }
         traversal.parentIdLookup[elementId] = parentId;
         if (debug)
-            std::cout << elementId << "=" << parentId << std::endl;
+            std::cout << elementId << "=" << parentId << '\n';
     }
 
     for (int childId : el->childIds) {
@@ -426,6 +426,32 @@ void UIScene::RemoveChild(int childId) {
 
 bool UIElement::UpdateLayout(UIStateTables &data, LayoutContext &context) {
     bool changed = false;
+
+    if (id == I_UNSET || id >= data.geometry.size())
+        return changed;
+
+    GeometryStoreState &myGeometry = data.geometry[id];
+    StyleStoreState &myStyle = data.style[id];
+
+    // Get parent dimensions for reference
+    float parentWidth = 800.0f;  // default fallback
+    float parentHeight = 800.0f; // default fallback
+
+    if (parentId != I_UNSET && parentId < data.geometry.size()) {
+        parentWidth = data.geometry[parentId].width;
+        parentHeight = data.geometry[parentId].height;
+    }
+
+    // Apply style to get final size
+    auto finalSize = ApplyStyle(myGeometry.width, myGeometry.height, parentWidth,
+                                parentHeight, myStyle);
+
+    if (finalSize[0] != myGeometry.width || finalSize[1] != myGeometry.height) {
+        myGeometry.width = finalSize[0];
+        myGeometry.height = finalSize[1];
+        changed = true;
+    }
+
     isDirty = false;
     return changed;
 }
@@ -449,17 +475,17 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
     if (MainHierarchy.hirearchyDirty == true) {
         frameTraversalData = MainHierarchy.RebuildTraversal(ptrStore);
         if (debug)
-            std::cout << "Building Traversal" << std::endl;
+            std::cout << "Building Traversal" << '\n';
     } else {
         frameTraversalData = MainHierarchy.ReturnCurrentTraversal();
         if (debug)
-            std::cout << "Skipping Traversal" << std::endl;
+            std::cout << "Skipping Traversal" << '\n';
     }
 
     const TraversalData &currentTraversalData = frameTraversalData;
     if (currentTraversalData.empty()) {
         if (debug)
-            std::cout << "Scene Empty" << std::endl;
+            std::cout << "Scene Empty" << '\n';
         return;
     }
 
@@ -472,15 +498,14 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
         frameGraphicalData = MainBatcher.ReBuildFrameData(
             dataTables, currentTraversalData.displayList, resolution[1]);
         if (debug)
-            std::cout << "Rebuilding Frame" << "| Layout dirty |"
-                      << rebuildFrameData << "| Data Empty | " << dataEmpty
-                      << std::endl;
+            std::cout << "Rebuilding Frame" << "| Layout dirty |" << rebuildFrameData
+                      << "| Data Empty | " << dataEmpty << '\n';
     }
 
     const RenderData &currentGraphicalData = frameGraphicalData;
     if (currentGraphicalData.empty()) {
         if (debug)
-            std::cout << "Data Empty" << std::endl;
+            std::cout << "Data Empty" << '\n';
         return;
     }
 
@@ -490,8 +515,7 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
     if (debug)
         std::cout << "Vertices: " << currentGraphicalData.vertices.size()
                   << " | Indices: " << currentGraphicalData.indices.size()
-                  << " | Commands: " << currentGraphicalData.commands.size()
-                  << std::endl;
+                  << " | Commands: " << currentGraphicalData.commands.size() << '\n';
 
     MainRenderer.UploadFrame(currentGraphicalData);
     MainRenderer.DrawFrame(currentGraphicalData.commands, resolution);
@@ -507,13 +531,13 @@ static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
     float h = geometry.height;
 
     frame.vertices.push_back(
-        {{x, y, 0.0f}, {color.r, color.g, color.b, color.a}});
+        {{x, y, 0.0f}, {color.r, color.g, color.b, color.a}, {0.0f, 0.0f}});
     frame.vertices.push_back(
-        {{x + w, y, 0.0f}, {color.r, color.g, color.b, color.a}});
+        {{x + w, y, 0.0f}, {color.r, color.g, color.b, color.a}, {1.0f, 0.0f}});
     frame.vertices.push_back(
-        {{x + w, y + h, 0.0f}, {color.r, color.g, color.b, color.a}});
+        {{x + w, y + h, 0.0f}, {color.r, color.g, color.b, color.a}, {1.0f, 1.0f}});
     frame.vertices.push_back(
-        {{x, y + h, 0.0f}, {color.r, color.g, color.b, color.a}});
+        {{x, y + h, 0.0f}, {color.r, color.g, color.b, color.a}, {0.0f, 1.0f}});
 
     constexpr GLuint quadIndices[6] = {0, 1, 2, 0, 2, 3};
 
@@ -524,11 +548,10 @@ static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
 
 static ScissorRect BuildScissorRect(const GeometryStoreState &geometry,
                                     float viewportHeight) {
-    return {static_cast<GLint>(geometry.absoluteX),
-            static_cast<GLint>(viewportHeight -
-                               (geometry.absoluteY + geometry.height)),
-            static_cast<GLsizei>(geometry.width),
-            static_cast<GLsizei>(geometry.height)};
+    return {
+        static_cast<GLint>(geometry.absoluteX),
+        static_cast<GLint>(viewportHeight - (geometry.absoluteY + geometry.height)),
+        static_cast<GLsizei>(geometry.width), static_cast<GLsizei>(geometry.height)};
 }
 
 const RenderData &
@@ -554,8 +577,8 @@ RenderBatcher::ReBuildFrameData(UIStateTables &dataTables,
                 currentBatch.indexCount = 0;
             }
 
-            ScissorRect rect = BuildScissorRect(
-                dataTables.geometry[op.elementId], viewportHeight);
+            ScissorRect rect =
+                BuildScissorRect(dataTables.geometry[op.elementId], viewportHeight);
 
             if (!scissorRects.empty()) {
                 rect = IntersectRects(scissorRects.back(), rect);
@@ -588,8 +611,7 @@ RenderBatcher::ReBuildFrameData(UIStateTables &dataTables,
         }
 
         case RenderOpType::DrawElement: {
-            const GeometryStoreState &geometry =
-                dataTables.geometry[op.elementId];
+            const GeometryStoreState &geometry = dataTables.geometry[op.elementId];
             const StyleStoreState &style = dataTables.style[op.elementId];
             if (style.hidden)
                 break;
@@ -614,7 +636,7 @@ const RenderData &RenderBatcher::GetFrameData() const { return FrameData; }
 void Renderer::Init() {
     if (initialized) {
         if (debug)
-            std::cout << "WARNING: RENDERER ALREADY INITIALIZED" << std::endl;
+            std::cout << "WARNING: RENDERER ALREADY INITIALIZED" << '\n';
         return;
     }
     DefaultShader.Load("default.vert", "default.frag");
@@ -622,9 +644,9 @@ void Renderer::Init() {
     MainVBO.Bind();
     MainEBO.Bind();
 
-    // set layouts 1 and 0 on VAO
-    MainVAO.LinkAttrib(MainVBO, VertexLayout);
-    MainVAO.LinkAttrib(MainVBO, FragmentLayout);
+    MainVAO.LinkAttrib(MainVBO, GeometryLayout);
+    MainVAO.LinkAttrib(MainVBO, ColorLayout);
+    MainVAO.LinkAttrib(MainVBO, UVLayout);
 
     MainVAO.Unbind();
     MainVBO.Unbind();
@@ -633,7 +655,7 @@ void Renderer::Init() {
     initialized = true;
     if (debug)
         std::cout << "VAO ID: " << MainVAO.ID << " | VBO ID: " << MainVBO.ID
-                  << " | EBO ID: " << MainEBO.ID << std::endl;
+                  << " | EBO ID: " << MainEBO.ID << '\n';
 }
 
 void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
@@ -643,7 +665,7 @@ void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
             std::cout << "WARNING: RENDERER NOT INITIALIZED BUT "
                          "Renderer::DrawFrame() "
                          "WAS CALLED"
-                      << std::endl;
+                      << '\n';
         return;
     }
     while (glGetError() != GL_NO_ERROR)
@@ -659,14 +681,13 @@ void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
         if (err != GL_NO_ERROR) {
             if (debug)
                 std::cout << "Error in glUniform2f (loc=" << resolutionUniform
-                          << "): 0x" << std::hex << err << std::dec
-                          << std::endl;
+                          << "): 0x" << std::hex << err << std::dec << '\n';
         }
     } else {
         if (debug)
             std::cout << "WARNING: u_resolution uniform location is -1! Check "
                          "Shader::Load."
-                      << std::endl;
+                      << '\n';
     }
 
     MainVAO.Bind();
@@ -684,29 +705,28 @@ void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
             GLenum err = glGetError();
             if (err != GL_NO_ERROR) {
                 if (debug)
-                    std::cout << "Error in glScissor (" << cmd.scissorBox.w
-                              << "x" << cmd.scissorBox.h << "): 0x" << std::hex
-                              << err << std::dec << std::endl;
+                    std::cout << "Error in glScissor (" << cmd.scissorBox.w << "x"
+                              << cmd.scissorBox.h << "): 0x" << std::hex << err
+                              << std::dec << '\n';
             }
         } else {
             glDisable(GL_SCISSOR_TEST);
         }
 
         glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(cmd.indexCount),
-                       GL_UNSIGNED_INT,
-                       (void *)(cmd.indexOffset * sizeof(GLuint)));
+                       GL_UNSIGNED_INT, (void *)(cmd.indexOffset * sizeof(GLuint)));
 
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
             if (debug)
                 std::cout << "Error in glDrawElements: 0x" << std::hex << err
-                          << std::dec << std::endl;
+                          << std::dec << '\n';
         }
     }
 
     if (debug)
         std::cout << "VAO ID: " << MainVAO.ID << " | VBO ID: " << MainVBO.ID
-                  << " | EBO ID: " << MainEBO.ID << std::endl;
+                  << " | EBO ID: " << MainEBO.ID << '\n';
 
     glDisable(GL_SCISSOR_TEST);
     MainEBO.Unbind();
@@ -719,7 +739,7 @@ void Renderer::UploadFrame(const RenderData &frameData) {
         if (debug)
             std::cout << "WARNING: RENDERER NOT INITIALIZED BUT "
                          "Renderer::UploadFrame() WAS CALLED"
-                      << std::endl;
+                      << '\n';
         return;
     }
     MainVAO.Bind();
@@ -732,8 +752,7 @@ void Renderer::UploadFrame(const RenderData &frameData) {
     MainEBO.Unbind();
 }
 
-bool VerticalContainer::UpdateLayout(UIStateTables &data,
-                                     LayoutContext &context) {
+bool VerticalContainer::UpdateLayout(UIStateTables &data, LayoutContext &context) {
     bool changed = false;
 
     if (childIds.empty()) {
@@ -750,8 +769,8 @@ bool VerticalContainer::UpdateLayout(UIStateTables &data,
         if (resizeChildren) {
             GeometryStoreState &myData = data.geometry[id];
             float bigger = std::max(childData.width, childData.height);
-            auto size = ApplyStyle(bigger, bigger, myData.width, myData.height,
-                                   childstyle);
+            auto size =
+                ApplyStyle(bigger, bigger, myData.width, myData.height, childstyle);
             childData.width = size[0];
             childData.height = size[1];
         }
@@ -805,6 +824,7 @@ bool VerticalContainer::UpdateLayout(UIStateTables &data,
     isDirty = false;
     return changed;
 }
+
 // goal: split UI manager
 // give UpdateLayout access to *LayoutManager instead of
 // the entire UIScene

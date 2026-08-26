@@ -62,8 +62,7 @@ int main() {
     uiScene.AddChild(container2, rect3);
     uiScene.AddChild(container, rect4);
 
-    uiScene.EditElementShape(root, {0.0f, 0.0f, resolution[0], resolution[1]},
-                             true);
+    uiScene.EditElementShape(root, {0.0f, 0.0f, resolution[0], resolution[1]}, true);
     uiScene.EditElementColor(root, {0.2f, 0.2f, 0.6f, 1.0f}, true);
 
     uiScene.EditElementShape(container, {200.0f, 20.0f, 30.0f, 30.0f}, true);
@@ -107,8 +106,7 @@ int main() {
         double currentTime = glfwGetTime();
         frameCount++;
         if (currentTime - lastTime >= 1.0) {
-            std::string title =
-                "UI Engine - " + std::to_string(frameCount) + " FPS";
+            std::string title = "UI Engine - " + std::to_string(frameCount) + " FPS";
             glfwSetWindowTitle(window, title.c_str());
             frameCount = 0;
             lastTime = currentTime;

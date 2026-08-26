@@ -26,6 +26,7 @@ typedef std::vector<std::unique_ptr<UIElement>> pointerVector;
 struct Vertex {
     GLfloat pos[3];
     GLfloat color[4];
+    GLfloat uv[2];
 };
 
 struct RectShape {
@@ -79,8 +80,7 @@ struct TraversalData {
     std::vector<RenderOp> displayList;
     std::vector<int> parentIdLookup;
     bool empty() const {
-        return (drawOrder.empty() || displayList.empty() ||
-                parentIdLookup.empty());
+        return (drawOrder.empty() || displayList.empty() || parentIdLookup.empty());
     }
 };
 
@@ -128,20 +128,27 @@ class UIElement {
     bool fitContentHeight = false;
     bool fitContentWidth = false;
     bool clipChildren = false;
+    bool unifiedCornerRadius = false;
 
     int id = I_UNSET;
     int parentId = I_UNSET;
 
     float minWidth = F_UNSET;
-    float maxWidth = F_UNSET;
+    float maxWidth = 9000.0f;
 
-    float minHeight = 9000.0f;
+    float minHeight = F_UNSET;
     float maxHeight = 9000.0f;
 
     float widthPercent = F_UNSET; // b/w 0.0f and 1.0f
     float heightPercent = F_UNSET;
 
     float padding = 5.0f;
+    float cornerRadius = 0.0f;
+    float cornerRadiusTopLeft = 0.0f;
+    float cornerRadiusTopRight = 0.0f;
+    float cornerRadiusBottomLeft = 0.0f;
+    float cornerRadiusBottomRight = 0.0f;
+    float borderWidth = 0.0f;
 
     std::vector<int> childIds;
 
@@ -220,24 +227,45 @@ class Renderer {
     EBO MainEBO;
     Shader DefaultShader;
     GLint resolutionUniform = I_UNSET;
-    // 0th layout: 3 floats each
-    // not normalized, 7 floats apart
+
+    // 0th layout: 3 floats each (x, y, z)
+    // not normalized, 11 floats apart
     // 0 offset from the start
-    Layout VertexLayout = {0,
-                           3,
-                           GL_FLOAT,
-                           GL_FALSE,
-                           7 * sizeof(float),
-                           static_cast<uintptr_t>(0 * sizeof(float))};
-    // 1st layout: 4 floats each
-    // not normalized, 7 floats apart
-    // 3 offset from the start
-    Layout FragmentLayout = {1,
-                             4,
+    Layout GeometryLayout = {0,
+                             3,
                              GL_FLOAT,
                              GL_FALSE,
-                             7 * sizeof(float),
-                             static_cast<uintptr_t>(3 * sizeof(float))};
+                             11 * sizeof(float),
+                             static_cast<uintptr_t>(0 * sizeof(float))};
+    // 1st layout: 4 floats each (r, g, b, a)
+    // not normalized, 11 floats apart
+    // 3 offset from the start
+    Layout ColorLayout = {1,
+                          4,
+                          GL_FLOAT,
+                          GL_FALSE,
+                          11 * sizeof(float),
+                          static_cast<uintptr_t>(3 * sizeof(float))};
+    // 2nd layout: 2 floats each (u, v)
+    // not normalized, 11 floats apart
+    // 7 offset from the start
+    Layout UVLayout = {2,
+                       2,
+                       GL_FLOAT,
+                       GL_FALSE,
+                       11 * sizeof(float),
+                       static_cast<uintptr_t>(7 * sizeof(float))};
+
+    // 3rd layout: 2 floats each (style params)
+    // not normalized, 11 floats apart
+    // 9 offset from the start
+    Layout StyleParams = {3,
+                          2,
+                          GL_FLOAT,
+                          GL_FALSE,
+                          11 * sizeof(float),
+                          static_cast<uintptr_t>(9 * sizeof(float))};
+
     bool initialized = false;
     bool debug = false;
 
@@ -279,8 +307,7 @@ class UIScene {
     void SetRoot(int id);
     void MarkDirty(int id);
     void MarkParentChainDirty(int id);
-    void EditElementShape(int id, const GeometryStoreState &props,
-                          bool dirtyChain);
+    void EditElementShape(int id, const GeometryStoreState &props, bool dirtyChain);
     void EditElementColor(int id, const Color &props, bool dirtyChain);
     void StepFrame(std::array<float, 2> &resolution);
     void AddChild(int parentId, int childId);
