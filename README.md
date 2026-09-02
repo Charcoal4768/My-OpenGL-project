@@ -19,3 +19,10 @@ The engine is in a stable but very primitive state as of now. I plan on adding s
 - Texture support
 I am currently working on these changes and additions. The current UI Engine can be used to make very simple graphical apps but does not have capabilities for input handling, displaying text and alot of other expected modern features. Despite this, it is a UI Engine and it does work.
 main.cpp is a demo file.
+
+### Requires glad, KHRplatform and glfw to function. 
+Please put the header files for these libraries in separate include directory sub-folders like ``/include/KHR/khrplatform.h`` and ``.c`` or ``.c++`` files in the ``/src/`` directory to run this project.
+
+### Using the Engine
+
+Replace the code inside ``main.cpp`` with your own application code to be able to use the engine. The engine is easily extensible, each newly declared graphical element just needs to inherit from the ``UIElement`` primitive. You can define the behavior for your new ``UIElement`` based object/element by overriding the ``UpdateLayout`` virtual function. To ensure some stability, an ``UpdateLayout`` function override should ideally only change the size and positions of the current element that the function belongs to or its children elements. Changing parents or siblings inside an element's ``UpdateLayout`` function may break things. There might be a direct assertion included in later versions of this engine to outright prevent this with a simple check.
