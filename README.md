@@ -1,10 +1,10 @@
 # Retained Mode UI Engine
 
-This is a very basic UI Engine i have been working on as a personal project. The engine contains a renderer, a batcher, a layout hirearchy manager and an object storage / lifetime manager.
+This is a very basic UI Engine i have been working on as a personal project. The engine contains a renderer, a batcher, a layout hierarchy manager and an object storage / lifetime manager.
 The core loop of the engine works like this:
 
 Every frame, the view port resolution is passed to the engine and StepFrame() is called. StepFrame takes the aforementioned resolution variable as an input. 
-Based on simply hierarchy dirtiness checks, the function determines whether or not to rebuild the frame data, upload new frame data, re-evaluate the layout and absolute positioning of elements and the constructed batches, etc.
+Based on simply hierarchy dirtiness checks, the function determines whether or not to rebuild the frame data, upload new frame data or re-evaluate the layout and absolute positioning of elements and the constructed batches, etc.
 
 ## End-Goal:
 
