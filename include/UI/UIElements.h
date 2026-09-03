@@ -27,6 +27,7 @@ struct Vertex {
     GLfloat pos[3];
     GLfloat color[4];
     GLfloat uv[2];
+    GLfloat styleParams[2]; // corner radius, border width
 };
 
 struct RectShape {
@@ -107,6 +108,8 @@ struct StyleStoreState {
 
     float prefferedWidthPercent = F_UNSET;
     float prefferedHeightPercent = F_UNSET;
+    float cornerRadius = 0.0f;
+    float borderWidth = 0.0f;
 
     bool hidden = false;
 
@@ -144,11 +147,12 @@ class UIElement {
 
     float padding = 5.0f;
     float cornerRadius = 0.0f;
-    float cornerRadiusTopLeft = 0.0f;
-    float cornerRadiusTopRight = 0.0f;
-    float cornerRadiusBottomLeft = 0.0f;
-    float cornerRadiusBottomRight = 0.0f;
     float borderWidth = 0.0f;
+    // float cornerRadiusTopLeft = 0.0f;
+    // float cornerRadiusTopRight = 0.0f;
+    // float cornerRadiusBottomLeft = 0.0f;
+    // float cornerRadiusBottomRight = 0.0f;
+    // float borderWidth = 0.0f;
 
     std::vector<int> childIds;
 
@@ -256,15 +260,15 @@ class Renderer {
                        11 * sizeof(float),
                        static_cast<uintptr_t>(7 * sizeof(float))};
 
-    // 3rd layout: 2 floats each (style params)
+    // 3rd layout: 2 floats each (crnr radius, borderWidth)
     // not normalized, 11 floats apart
     // 9 offset from the start
-    Layout StyleParams = {3,
-                          2,
-                          GL_FLOAT,
-                          GL_FALSE,
-                          11 * sizeof(float),
-                          static_cast<uintptr_t>(9 * sizeof(float))};
+    Layout StyleParamLayout = {3,
+                               2,
+                               GL_FLOAT,
+                               GL_FALSE,
+                               11 * sizeof(float),
+                               static_cast<uintptr_t>(9 * sizeof(float))};
 
     bool initialized = false;
     bool debug = false;
@@ -369,6 +373,8 @@ class UIScene {
         elementAppearance.maxWidth = F_UNSET;
         elementAppearance.minHeight = F_UNSET;
         elementAppearance.minWidth = F_UNSET;
+        elementAppearance.cornerRadius = 0.0f;
+        elementAppearance.borderWidth = 0.0f;
 
         dataTables.geometry.push_back(elementShape);
         dataTables.style.push_back(elementAppearance);

@@ -522,22 +522,31 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
 }
 
 static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
-                       const Color &color) {
+                       const StyleStoreState &style) {
     GLuint baseVertex = static_cast<GLuint>(frame.vertices.size());
 
     float x = geometry.absoluteX;
     float y = geometry.absoluteY;
     float w = geometry.width;
     float h = geometry.height;
+    Color color = style.color;
 
-    frame.vertices.push_back(
-        {{x, y, 0.0f}, {color.r, color.g, color.b, color.a}, {0.0f, 0.0f}});
-    frame.vertices.push_back(
-        {{x + w, y, 0.0f}, {color.r, color.g, color.b, color.a}, {1.0f, 0.0f}});
-    frame.vertices.push_back(
-        {{x + w, y + h, 0.0f}, {color.r, color.g, color.b, color.a}, {1.0f, 1.0f}});
-    frame.vertices.push_back(
-        {{x, y + h, 0.0f}, {color.r, color.g, color.b, color.a}, {0.0f, 1.0f}});
+    frame.vertices.push_back({{x, y, 0.0f},
+                              {color.r, color.g, color.b, color.a},
+                              {0.0f, 0.0f},
+                              {style.cornerRadius, style.borderWidth}});
+    frame.vertices.push_back({{x + w, y, 0.0f},
+                              {color.r, color.g, color.b, color.a},
+                              {1.0f, 0.0f},
+                              {style.cornerRadius, style.borderWidth}});
+    frame.vertices.push_back({{x + w, y + h, 0.0f},
+                              {color.r, color.g, color.b, color.a},
+                              {1.0f, 1.0f},
+                              {style.cornerRadius, style.borderWidth}});
+    frame.vertices.push_back({{x, y + h, 0.0f},
+                              {color.r, color.g, color.b, color.a},
+                              {0.0f, 1.0f},
+                              {style.cornerRadius, style.borderWidth}});
 
     constexpr GLuint quadIndices[6] = {0, 1, 2, 0, 2, 3};
 
@@ -615,7 +624,7 @@ RenderBatcher::ReBuildFrameData(UIStateTables &dataTables,
             const StyleStoreState &style = dataTables.style[op.elementId];
             if (style.hidden)
                 break;
-            AppendQuad(FrameData, geometry, style.color);
+            AppendQuad(FrameData, geometry, style);
             currentBatch.indexCount += 6;
             break;
         }
@@ -647,6 +656,7 @@ void Renderer::Init() {
     MainVAO.LinkAttrib(MainVBO, GeometryLayout);
     MainVAO.LinkAttrib(MainVBO, ColorLayout);
     MainVAO.LinkAttrib(MainVBO, UVLayout);
+    MainVAO.LinkAttrib(MainVBO, StyleParamLayout);
 
     MainVAO.Unbind();
     MainVBO.Unbind();
