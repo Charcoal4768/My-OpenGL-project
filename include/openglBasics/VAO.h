@@ -10,6 +10,7 @@ struct Layout {
     GLboolean normalized;
     GLsizeiptr stride;
     uintptr_t offset;
+    GLuint divisor = 0; // default value for divisor
 };
 
 class VAO {
