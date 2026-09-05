@@ -246,6 +246,111 @@ void UIScene::EditElementColor(int id, const Color &newColor, bool dirtyChain) {
     }
 }
 
+void UIScene::EditElementBorder(int id, float borderWidth, bool dirtyChain) {
+    assert(id >= 0);
+    assert(id < ptrStore.size());
+    assert(ptrStore[id] != nullptr);
+
+    UIElement *el = ptrStore[id].get();
+
+    float &elementBorderWidth = dataTables.style[id].borderWidth;
+
+    bool borderChanged = (elementBorderWidth != borderWidth);
+
+    if (!borderChanged)
+        return;
+
+    elementBorderWidth = borderWidth;
+
+    if (dirtyChain && borderChanged) {
+        el->isDirty = true;
+        if (el->parentId != -1 && ptrStore[el->parentId]) {
+            MarkParentChainDirty(id);
+        }
+    }
+}
+
+void UIScene::EditElementBorderColor(int id, const Color &borderColor,
+                                     bool dirtyChain) {
+    assert(id >= 0);
+    assert(id < ptrStore.size());
+    assert(ptrStore[id] != nullptr);
+
+    UIElement *el = ptrStore[id].get();
+
+    Color &elementBorderColor = dataTables.style[id].borderColor;
+
+    bool borderColorChanged = (elementBorderColor != borderColor);
+
+    if (!borderColorChanged)
+        return;
+
+    elementBorderColor = borderColor;
+
+    if (dirtyChain && borderColorChanged) {
+        el->isDirty = true;
+        if (el->parentId != -1 && ptrStore[el->parentId]) {
+            MarkParentChainDirty(id);
+        }
+    }
+}
+
+void UIScene::EditElementCornerRadius(int id, float topLeft, float topRight,
+                                      float bottomLeft, float bottomRight,
+                                      bool dirtyChain) {
+    assert(id >= 0);
+    assert(id < ptrStore.size());
+    assert(ptrStore[id] != nullptr);
+
+    UIElement *el = ptrStore[id].get();
+
+    StyleStoreState &elementStyle = dataTables.style[id];
+
+    bool cornerChanged = (elementStyle.cornerRadiusTopLeft != topLeft ||
+                          elementStyle.cornerRadiusTopRight != topRight ||
+                          elementStyle.cornerRadiusBottomLeft != bottomLeft ||
+                          elementStyle.cornerRadiusBottomRight != bottomRight);
+
+    if (!cornerChanged)
+        return;
+
+    elementStyle.cornerRadiusTopLeft = topLeft;
+    elementStyle.cornerRadiusTopRight = topRight;
+    elementStyle.cornerRadiusBottomLeft = bottomLeft;
+    elementStyle.cornerRadiusBottomRight = bottomRight;
+
+    if (dirtyChain && cornerChanged) {
+        el->isDirty = true;
+        if (el->parentId != -1 && ptrStore[el->parentId]) {
+            MarkParentChainDirty(id);
+        }
+    }
+}
+
+void UIScene::EditElementPadding(int id, float padding, bool dirtyChain) {
+    assert(id >= 0);
+    assert(id < ptrStore.size());
+    assert(ptrStore[id] != nullptr);
+
+    UIElement *el = ptrStore[id].get();
+
+    float &elementPadding = dataTables.style[id].padding;
+
+    bool paddingChanged = (elementPadding != padding);
+
+    if (!paddingChanged)
+        return;
+
+    elementPadding = padding;
+
+    if (dirtyChain && paddingChanged) {
+        el->isDirty = true;
+        if (el->parentId != -1 && ptrStore[el->parentId]) {
+            MarkParentChainDirty(id);
+        }
+    }
+}
+
 const GeometryStoreState &UIScene::GetElementShape(int id) const {
     assert(id >= 0);
     assert(id < dataTables.geometry.size());
@@ -341,7 +446,7 @@ void Hierarchy::RecursiveDownTraversal(int elementId) {
     traversal.displayList.push_back({RenderOpType::DrawElement, elementId});
     traversal.drawOrder.emplace_back(elementId);
     if (parentId != I_UNSET) {
-        // index = element id, value = parent id
+        // instance = element id, value = parent id
         // sanity checks:
         // elementId should exist in drawOrder | Done
         // elementId should not be I_UNSET | Done
@@ -417,8 +522,8 @@ void UIScene::RemoveChild(int childId) {
     auto it = std::find(childIds.begin(), childIds.end(), childId);
 
     if (it != childIds.end()) {
-        int index = it - childIds.begin();
-        std::swap(childIds[index], childIds.back());
+        int instance = it - childIds.begin();
+        std::swap(childIds[instance], childIds.back());
         childIds.pop_back();
     }
     MainHierarchy.hirearchyDirty = true;
@@ -513,46 +618,45 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
         MainRenderer.Init();
 
     if (debug)
-        std::cout << "Vertices: " << currentGraphicalData.vertices.size()
-                  << " | Indices: " << currentGraphicalData.indices.size()
+        std::cout << "Vertices: " << currentGraphicalData.instances.size() * 6
+                  << " | instances: " << currentGraphicalData.instances.size()
                   << " | Commands: " << currentGraphicalData.commands.size() << '\n';
 
     MainRenderer.UploadFrame(currentGraphicalData);
     MainRenderer.DrawFrame(currentGraphicalData.commands, resolution);
 }
 
+uint32_t PackColor(const Color &color) {
+    uint32_t packedColor;
+    unsigned int rBits =
+        static_cast<unsigned int>(std::clamp(color.r * 255.0f, 0.0f, 255.0f));
+    unsigned int gBits =
+        static_cast<unsigned int>(std::clamp(color.g * 255.0f, 0.0f, 255.0f)) << 8;
+    unsigned int bBits =
+        static_cast<unsigned int>(std::clamp(color.b * 255.0f, 0.0f, 255.0f)) << 16;
+    unsigned int aBits =
+        static_cast<unsigned int>(std::clamp(color.a * 255.0f, 0.0f, 255.0f)) << 24;
+    packedColor = rBits | gBits | bBits | aBits;
+    return packedColor;
+}
+
 static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
                        const StyleStoreState &style) {
-    GLuint baseVertex = static_cast<GLuint>(frame.vertices.size());
-
     float x = geometry.absoluteX;
     float y = geometry.absoluteY;
     float w = geometry.width;
     float h = geometry.height;
-    Color color = style.color;
+    float borderWidth = style.borderWidth;
+    float cornerRadiusTopLeft = style.cornerRadiusTopLeft;
+    float cornerRadiusTopRight = style.cornerRadiusTopRight;
+    float cornerRadiusBottomLeft = style.cornerRadiusBottomLeft;
+    float cornerRadiusBottomRight = style.cornerRadiusBottomRight;
 
-    frame.vertices.push_back({{x, y, 0.0f},
-                              {color.r, color.g, color.b, color.a},
-                              {0.0f, 0.0f},
-                              {style.cornerRadius, style.borderWidth}});
-    frame.vertices.push_back({{x + w, y, 0.0f},
-                              {color.r, color.g, color.b, color.a},
-                              {1.0f, 0.0f},
-                              {style.cornerRadius, style.borderWidth}});
-    frame.vertices.push_back({{x + w, y + h, 0.0f},
-                              {color.r, color.g, color.b, color.a},
-                              {1.0f, 1.0f},
-                              {style.cornerRadius, style.borderWidth}});
-    frame.vertices.push_back({{x, y + h, 0.0f},
-                              {color.r, color.g, color.b, color.a},
-                              {0.0f, 1.0f},
-                              {style.cornerRadius, style.borderWidth}});
+    // packing color
+    uint32_t packedColor = PackColor(style.color);
+    ElementInstance newInstance;
 
-    constexpr GLuint quadIndices[6] = {0, 1, 2, 0, 2, 3};
-
-    for (GLuint index : quadIndices) {
-        frame.indices.push_back(baseVertex + index);
-    }
+    frame.instances.push_back(newInstance);
 }
 
 static ScissorRect BuildScissorRect(const GeometryStoreState &geometry,
@@ -567,23 +671,22 @@ const RenderData &
 RenderBatcher::ReBuildFrameData(UIStateTables &dataTables,
                                 const std::vector<RenderOp> &displayList,
                                 float viewportHeight) {
-    FrameData.vertices.clear();
-    FrameData.indices.clear();
+    FrameData.instances.clear();
     FrameData.commands.clear();
 
     DrawCommand currentBatch; // we make a new batch
-    currentBatch.indexOffset = 0;
-    currentBatch.indexCount = 0;
+    currentBatch.instanceOffset = 0;
+    currentBatch.instanceCount = 0;
 
     std::vector<ScissorRect> scissorRects;
 
     for (const RenderOp &op : displayList) {
         switch (op.type) {
         case RenderOpType::PushScissor: {
-            if (currentBatch.indexCount > 0) {
+            if (currentBatch.instanceCount > 0) {
                 FrameData.commands.push_back(currentBatch);
-                currentBatch.indexOffset = FrameData.indices.size();
-                currentBatch.indexCount = 0;
+                currentBatch.instanceOffset = FrameData.instances.size();
+                currentBatch.instanceCount = 0;
             }
 
             ScissorRect rect =
@@ -602,10 +705,10 @@ RenderBatcher::ReBuildFrameData(UIStateTables &dataTables,
         }
 
         case RenderOpType::PopScissor: {
-            if (currentBatch.indexCount > 0) {
+            if (currentBatch.instanceCount > 0) {
                 FrameData.commands.push_back(currentBatch);
-                currentBatch.indexOffset = FrameData.indices.size();
-                currentBatch.indexCount = 0;
+                currentBatch.instanceOffset = FrameData.instances.size();
+                currentBatch.instanceCount = 0;
             }
 
             scissorRects.pop_back();
@@ -625,7 +728,7 @@ RenderBatcher::ReBuildFrameData(UIStateTables &dataTables,
             if (style.hidden)
                 break;
             AppendQuad(FrameData, geometry, style);
-            currentBatch.indexCount += 6;
+            currentBatch.instanceCount += 1;
             break;
         }
 
@@ -634,7 +737,7 @@ RenderBatcher::ReBuildFrameData(UIStateTables &dataTables,
         }
     }
 
-    if (currentBatch.indexCount > 0) {
+    if (currentBatch.instanceCount > 0) {
         FrameData.commands.push_back(currentBatch);
     }
     return FrameData;
@@ -651,21 +754,20 @@ void Renderer::Init() {
     DefaultShader.Load("default.vert", "default.frag");
     MainVAO.Bind();
     MainVBO.Bind();
-    MainEBO.Bind();
+    // MainEBO.Bind();
 
-    MainVAO.LinkAttrib(MainVBO, GeometryLayout);
-    MainVAO.LinkAttrib(MainVBO, ColorLayout);
-    MainVAO.LinkAttrib(MainVBO, UVLayout);
-    MainVAO.LinkAttrib(MainVBO, StyleParamLayout);
+    MainVAO.LinkAttrib(MainVBO, TransformLayout);
+    MainVAO.LinkAttrib(MainVBO, PackedColor);
+    MainVAO.LinkAttrib(MainVBO, BorderStyle);
+    MainVAO.LinkAttrib(MainVBO, CornerStyle);
 
     MainVAO.Unbind();
     MainVBO.Unbind();
-    MainEBO.Unbind();
+    // MainEBO.Unbind();
     resolutionUniform = glGetUniformLocation(DefaultShader.ID, "u_resolution");
     initialized = true;
     if (debug)
-        std::cout << "VAO ID: " << MainVAO.ID << " | VBO ID: " << MainVBO.ID
-                  << " | EBO ID: " << MainEBO.ID << '\n';
+        std::cout << "VAO ID: " << MainVAO.ID << " | VBO ID: " << MainVBO.ID << '\n';
 }
 
 void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
@@ -701,11 +803,11 @@ void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
     }
 
     MainVAO.Bind();
-    MainEBO.Bind();
+    // MainEBO.Bind();
     MainVBO.Bind();
 
     for (const DrawCommand &cmd : commandsData) {
-        if (cmd.indexCount == 0)
+        if (cmd.instanceCount == 0)
             continue;
         if (cmd.useScissor) {
             glEnable(GL_SCISSOR_TEST);
@@ -723,8 +825,11 @@ void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
             glDisable(GL_SCISSOR_TEST);
         }
 
-        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(cmd.indexCount),
-                       GL_UNSIGNED_INT, (void *)(cmd.indexOffset * sizeof(GLuint)));
+        // glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(cmd.instanceCount),
+        //                GL_UNSIGNED_INT, (void *)(cmd.instanceOffset *
+        //                sizeof(GLuint)));
+        glDrawArraysInstanced(GL_TRIANGLES, 0, 6,
+                              static_cast<GLsizei>(cmd.instanceCount));
 
         GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
@@ -735,11 +840,10 @@ void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
     }
 
     if (debug)
-        std::cout << "VAO ID: " << MainVAO.ID << " | VBO ID: " << MainVBO.ID
-                  << " | EBO ID: " << MainEBO.ID << '\n';
+        std::cout << "VAO ID: " << MainVAO.ID << " | VBO ID: " << MainVBO.ID << '\n';
 
     glDisable(GL_SCISSOR_TEST);
-    MainEBO.Unbind();
+    // MainEBO.Unbind();
     MainVBO.Unbind();
     MainVAO.Unbind();
 }
@@ -753,13 +857,11 @@ void Renderer::UploadFrame(const RenderData &frameData) {
         return;
     }
     MainVAO.Bind();
-    MainVBO.Data(frameData.vertices.size() * sizeof(Vertex),
-                 frameData.vertices.data());
-    MainEBO.Data(frameData.indices.size() * sizeof(GLuint),
-                 frameData.indices.data());
+    MainVBO.Data(frameData.instances.size() * sizeof(ElementInstance),
+                 frameData.instances.data());
     MainVAO.Unbind();
     MainVBO.Unbind();
-    MainEBO.Unbind();
+    // MainEBO.Unbind();
 }
 
 bool VerticalContainer::UpdateLayout(UIStateTables &data, LayoutContext &context) {
@@ -770,7 +872,7 @@ bool VerticalContainer::UpdateLayout(UIStateTables &data, LayoutContext &context
         return changed;
     }
 
-    float targetX = 0, targetY = padding;
+    float targetX = 0, targetY = data.style[id].padding;
     float childLargestWidth = 0.0f;
 
     for (int childId : childIds) {
@@ -788,7 +890,7 @@ bool VerticalContainer::UpdateLayout(UIStateTables &data, LayoutContext &context
     }
 
     if (fitContentWidth) {
-        float fitWidth = childLargestWidth + 2 * padding;
+        float fitWidth = childLargestWidth + 2 * data.style[id].padding;
         float oldWidth = data.geometry[id].width;
 
         data.geometry[id].width = std::max(oldWidth, fitWidth);
@@ -804,7 +906,7 @@ bool VerticalContainer::UpdateLayout(UIStateTables &data, LayoutContext &context
             targetX =
                 (data.geometry[id].width - data.geometry[childId].width) * 0.5f;
         } else {
-            targetX = padding;
+            targetX = data.style[id].padding;
         }
 
         float oldChildX = data.geometry[childId].localX;
@@ -819,7 +921,7 @@ bool VerticalContainer::UpdateLayout(UIStateTables &data, LayoutContext &context
             changed = true;
         }
 
-        targetY += padding + data.geometry[childId].height;
+        targetY += data.style[id].padding + data.geometry[childId].height;
     }
 
     if (fitContentHeight) {

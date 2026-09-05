@@ -7,7 +7,7 @@ set(OpenGL_GL_PREFERENCE GLVND)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Force small binary size optimizations and strip debug symbols in Release mode
-set(CMAKE_CXX_FLAGS_RELEASE "-Os -s")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -s")
 
 # 1. Locate system dependencies FIRST
 find_package(glfw3 REQUIRED)

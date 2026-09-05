@@ -67,9 +67,11 @@ int main() {
 
     uiScene.EditElementShape(container, {200.0f, 20.0f, 30.0f, 30.0f}, true);
     uiScene.EditElementColor(container, {0.5f, 0.1f, 0.5f, 1.0f}, true);
+    uiScene.EditElementPadding(container, 10.0f, true);
 
     uiScene.EditElementShape(container2, {180.0f, 40.0f, 10.0f, 20.0f}, true);
     uiScene.EditElementColor(container2, {1.0f, 0.5f, 0.1f, 1.0f}, true);
+    uiScene.EditElementPadding(container2, 5.0f, true);
 
     uiScene.EditElementShape(rect1, {0.0f, 0.0f, 60.0f, 40.0f}, true);
     uiScene.EditElementColor(rect1, {0.3f, 1.0f, 0.4f, 1.0f}, true);
@@ -85,14 +87,12 @@ int main() {
 
     auto &c = uiScene.Get<VerticalContainer>(container);
     auto &c2 = uiScene.Get<VerticalContainer>(container2);
-    c.padding = 15.00f;
     c.centerHorizontally = true;
     c.fitContentHeight = true;
     c.fitContentWidth = true;
     c.resizeChildren = true;
     c.clipChildren = true;
 
-    c2.padding = 5.50f;
     c2.centerHorizontally = true;
     c2.fitContentHeight = true;
     c2.fitContentWidth = true;

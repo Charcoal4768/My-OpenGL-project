@@ -7,10 +7,11 @@ struct Layout {
     GLuint index;
     GLuint componentCount;
     GLenum type;
-    GLboolean normalized;
+    GLboolean normalized = GL_FALSE;
     GLsizeiptr stride;
     uintptr_t offset;
-    GLuint divisor = 0; // default value for divisor
+    GLuint divisor = 0;
+    GLboolean preserveInt = GL_FALSE;
 };
 
 class VAO {

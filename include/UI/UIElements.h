@@ -10,8 +10,6 @@
 #include <openglBasics/shaderclass.h>
 #include <vector>
 
-// DOES NOT WORK RN, MASSIVE REFACTOR CURRENTLY HAPPENING
-
 class UIElement;
 class LayoutContext;
 class Hierarchy;
@@ -23,16 +21,19 @@ constexpr float F_UNSET = -1.0f;
 constexpr int I_UNSET = -1;
 typedef std::vector<std::unique_ptr<UIElement>> pointerVector;
 
-struct Vertex {
-    GLfloat pos[3];
-    GLfloat color[4];
-    GLfloat uv[2];
-    GLfloat styleParams[2]; // corner radius, border width
-};
+// Vertex Struct no longer neeced
+// struct Vertex {
+//     GLfloat pos[3];
+//     GLfloat color[4];
+//     GLfloat uv[2];
+//     GLfloat styleParams[2]; // corner radius, border width
+// };
 
-struct RectShape {
-    std::array<Vertex, 4> localVertices;
-    std::array<GLuint, 6> localIndices = {0, 1, 2, 0, 2, 3};
+struct __attribute__((packed)) ElementInstance {
+    GLfloat transform[4];
+    GLuint packedColor;
+    GLuint borderInfo[2]; // packed 4 edge toggles and 4 color bits, space for more
+    GLuint cornerInfo;    // packed 4 corner raddii, space for future values
 };
 
 struct ScissorRect {
@@ -41,8 +42,8 @@ struct ScissorRect {
 };
 
 struct DrawCommand {
-    size_t indexOffset = I_UNSET;
-    GLsizei indexCount = I_UNSET;
+    size_t instanceOffset = I_UNSET;
+    GLsizei instanceCount = I_UNSET;
     bool useScissor = false;
     ScissorRect scissorBox;
 };
@@ -68,12 +69,9 @@ struct RenderOp {
 };
 
 struct RenderData {
-    std::vector<Vertex> vertices;
-    std::vector<GLuint> indices;
+    std::vector<ElementInstance> instances;
     std::vector<DrawCommand> commands;
-    bool empty() const {
-        return (vertices.empty() || indices.empty() || commands.empty());
-    }
+    bool empty() const { return (instances.empty() || commands.empty()); }
 };
 
 struct TraversalData {
@@ -108,9 +106,14 @@ struct StyleStoreState {
 
     float prefferedWidthPercent = F_UNSET;
     float prefferedHeightPercent = F_UNSET;
-    float cornerRadius = 0.0f;
     float borderWidth = 0.0f;
-
+    Color borderColor = {0.0f, 0.0f, 0.0f, 1.0f};
+    float cornerRadiusTopLeft = 0.0f;
+    float cornerRadiusTopRight = 0.0f;
+    float cornerRadiusBottomLeft = 0.0f;
+    float cornerRadiusBottomRight = 0.0f;
+    float padding = 0.0f; // padding is applied to children, not self, so it does not
+                          // affect own size
     bool hidden = false;
 
     Color color;
@@ -121,17 +124,13 @@ struct UIStateTables {
     std::vector<StyleStoreState> style;
 };
 
-// ui element dosent know who it is without a manager
+// ui element dosent function without a manager
 class UIElement {
-  private:
-    RectShape drawRect;
-
   public:
     bool isDirty = true;
     bool fitContentHeight = false;
     bool fitContentWidth = false;
     bool clipChildren = false;
-    bool unifiedCornerRadius = false;
 
     int id = I_UNSET;
     int parentId = I_UNSET;
@@ -145,9 +144,8 @@ class UIElement {
     float widthPercent = F_UNSET; // b/w 0.0f and 1.0f
     float heightPercent = F_UNSET;
 
-    float padding = 5.0f;
-    float cornerRadius = 0.0f;
-    float borderWidth = 0.0f;
+    // float padding = 5.0f;
+    // float borderWidth = 0.0f;
     // float cornerRadiusTopLeft = 0.0f;
     // float cornerRadiusTopRight = 0.0f;
     // float cornerRadiusBottomLeft = 0.0f;
@@ -228,47 +226,47 @@ class Renderer {
   private:
     VAO MainVAO;
     VBO MainVBO;
-    EBO MainEBO;
+    // EBO MainEBO; no longer required
     Shader DefaultShader;
     GLint resolutionUniform = I_UNSET;
 
-    // 0th layout: 3 floats each (x, y, z)
-    // not normalized, 11 floats apart
-    // 0 offset from the start
-    Layout GeometryLayout = {0,
-                             3,
-                             GL_FLOAT,
-                             GL_FALSE,
-                             11 * sizeof(float),
-                             static_cast<uintptr_t>(0 * sizeof(float))};
-    // 1st layout: 4 floats each (r, g, b, a)
-    // not normalized, 11 floats apart
-    // 3 offset from the start
-    Layout ColorLayout = {1,
-                          4,
-                          GL_FLOAT,
-                          GL_FALSE,
-                          11 * sizeof(float),
-                          static_cast<uintptr_t>(3 * sizeof(float))};
-    // 2nd layout: 2 floats each (u, v)
-    // not normalized, 11 floats apart
-    // 7 offset from the start
-    Layout UVLayout = {2,
-                       2,
-                       GL_FLOAT,
-                       GL_FALSE,
-                       11 * sizeof(float),
-                       static_cast<uintptr_t>(7 * sizeof(float))};
+    Layout TransformLayout = {0,
+                              4,
+                              GL_FLOAT,
+                              GL_FALSE,
+                              sizeof(ElementInstance),
+                              static_cast<uintptr_t>(0 * sizeof(float)),
+                              1,
+                              GL_FALSE};
 
-    // 3rd layout: 2 floats each (crnr radius, borderWidth)
-    // not normalized, 11 floats apart
-    // 9 offset from the start
-    Layout StyleParamLayout = {3,
-                               2,
-                               GL_FLOAT,
-                               GL_FALSE,
-                               11 * sizeof(float),
-                               static_cast<uintptr_t>(9 * sizeof(float))};
+    Layout PackedColor = {1,
+                          4,
+                          GL_UNSIGNED_BYTE,
+                          GL_TRUE,
+                          sizeof(ElementInstance),
+                          static_cast<uintptr_t>(4 * sizeof(float)),
+                          1,
+                          GL_FALSE};
+
+    Layout BorderStyle = {
+        2,
+        2,
+        GL_UNSIGNED_INT,
+        GL_FALSE,
+        sizeof(ElementInstance),
+        static_cast<uintptr_t>((4 * sizeof(float)) + (1 * sizeof(uint32_t))),
+        1,
+        GL_TRUE};
+
+    Layout CornerStyle = {
+        3,
+        1,
+        GL_UNSIGNED_INT,
+        GL_FALSE,
+        sizeof(ElementInstance),
+        static_cast<uintptr_t>((4 * sizeof(float)) + (3 * sizeof(uint32_t))),
+        1,
+        GL_TRUE};
 
     bool initialized = false;
     bool debug = false;
@@ -313,6 +311,12 @@ class UIScene {
     void MarkParentChainDirty(int id);
     void EditElementShape(int id, const GeometryStoreState &props, bool dirtyChain);
     void EditElementColor(int id, const Color &props, bool dirtyChain);
+    void EditElementBorder(int id, float borderWidth, bool dirtyChain);
+    void EditElementBorderColor(int id, const Color &borderColor, bool dirtyChain);
+    void EditElementCornerRadius(int id, float topLeft, float topRight,
+                                 float bottomLeft, float bottomRight,
+                                 bool dirtyChain);
+    void EditElementPadding(int id, float padding, bool dirtyChain);
     void StepFrame(std::array<float, 2> &resolution);
     void AddChild(int parentId, int childId);
     void RemoveChild(int childId);
@@ -373,8 +377,13 @@ class UIScene {
         elementAppearance.maxWidth = F_UNSET;
         elementAppearance.minHeight = F_UNSET;
         elementAppearance.minWidth = F_UNSET;
-        elementAppearance.cornerRadius = 0.0f;
+        elementAppearance.cornerRadiusTopLeft = 0.0f;
+        elementAppearance.cornerRadiusTopRight = 0.0f;
+        elementAppearance.cornerRadiusBottomLeft = 0.0f;
+        elementAppearance.cornerRadiusBottomRight = 0.0f;
         elementAppearance.borderWidth = 0.0f;
+        elementAppearance.borderColor = {0.0f, 0.0f, 0.0f, 1.0f};
+        elementAppearance.padding = 0.0f;
 
         dataTables.geometry.push_back(elementShape);
         dataTables.style.push_back(elementAppearance);
