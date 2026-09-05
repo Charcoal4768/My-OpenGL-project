@@ -3,10 +3,15 @@
 
 out vec4 FragColor; 
 
-in vec4 color; 
-in vec2 uv;
+in vec4 v_Color; 
+in vec2 v_UV;
+
+flat in vec4 v_BorderWidths;
+flat in vec4 v_BorderColor;
+flat in vec4 v_CornerRadii;
+
 
 void main()
 {
-   FragColor = vec4(color);
+   FragColor = vec4(v_Color);
 }

@@ -77,6 +77,7 @@ bool LayoutManager::Run(const TraversalData &traversal,
     if (elementPointers.back() == nullptr)
         return rebuildRender;
     context.currentElementReferences = &elementPointers;
+    context.parentIdLookup = &traversal.parentIdLookup;
     for (int elementId : traversal.drawOrder) {
         int parentId = (elementId < traversal.parentIdLookup.size())
                            ? traversal.parentIdLookup[elementId]
@@ -104,6 +105,7 @@ bool LayoutManager::Run(const TraversalData &traversal,
         }
     }
     context.currentElementReferences = nullptr;
+    context.parentIdLookup = nullptr;
     return rebuildRender;
 }
 
@@ -137,8 +139,26 @@ void UIScene::MarkParentChainDirty(int elementId) {
     MarkParentChainDirty(parentId);
 }
 
-void LayoutContext::MarkDirty(int id) {
+bool LayoutContext::IsChildOf(int childId, int parentId) const {
     assert(currentElementReferences != nullptr);
+    assert(parentId >= 0 && parentId < parentIdLookup->size());
+    assert(childId >= 0 && childId < currentElementReferences->size());
+
+    if (childId == parentId)
+        return true;
+
+    int currentParent = (*parentIdLookup)[childId];
+    while (currentParent != I_UNSET) {
+        if (currentParent == parentId)
+            return true;
+        currentParent = (*parentIdLookup)[currentParent];
+    }
+    return false;
+}
+
+void LayoutContext::MarkDirty(int id, int callerId) {
+    assert(currentElementReferences != nullptr);
+    assert(id == callerId || IsChildOf(id, callerId));
     if (id == I_UNSET || id >= currentElementReferences->size())
         return;
 
@@ -147,24 +167,20 @@ void LayoutContext::MarkDirty(int id) {
         el->isDirty = true;
 }
 
-void LayoutContext::MarkParentChainDirty(int elementId) {
+void LayoutContext::MarkParentChainDirty(int targetId, int callerId) {
     assert(currentElementReferences != nullptr);
+    assert(targetId == callerId || IsChildOf(targetId, callerId));
 
-    if (elementId == I_UNSET || elementId >= currentElementReferences->size())
-        return;
+    int currentId = targetId;
+    while (currentId != I_UNSET &&
+           currentId < (int)currentElementReferences->size()) {
+        UIElement *el = (*currentElementReferences)[currentId].get();
+        if (!el)
+            break;
 
-    UIElement *el = (*currentElementReferences)[elementId].get();
-
-    if (!el)
-        return;
-
-    int parentId = el->parentId;
-    el->isDirty = true;
-
-    if (parentId == I_UNSET)
-        return;
-
-    MarkParentChainDirty(parentId);
+        el->isDirty = true;
+        currentId = el->parentId; // Climb up cleanly
+    }
 }
 
 ScissorRect IntersectRects(const ScissorRect &a, const ScissorRect &b) {
@@ -246,21 +262,29 @@ void UIScene::EditElementColor(int id, const Color &newColor, bool dirtyChain) {
     }
 }
 
-void UIScene::EditElementBorder(int id, float borderWidth, bool dirtyChain) {
+void UIScene::EditElementBorder(int id, float borderTop = 0.0f,
+                                float borderRight = 0.0f, float borderBottom = 0.0f,
+                                float borderLeft = 0.0f, bool dirtyChain) {
     assert(id >= 0);
     assert(id < ptrStore.size());
     assert(ptrStore[id] != nullptr);
 
     UIElement *el = ptrStore[id].get();
 
-    float &elementBorderWidth = dataTables.style[id].borderWidth;
+    StyleStoreState &elementStyle = dataTables.style[id];
 
-    bool borderChanged = (elementBorderWidth != borderWidth);
+    bool borderChanged = (elementStyle.borderTop != borderTop ||
+                          elementStyle.borderRight != borderRight ||
+                          elementStyle.borderBottom != borderBottom ||
+                          elementStyle.borderLeft != borderLeft);
 
     if (!borderChanged)
         return;
 
-    elementBorderWidth = borderWidth;
+    elementStyle.borderTop = borderTop;
+    elementStyle.borderRight = borderRight;
+    elementStyle.borderBottom = borderBottom;
+    elementStyle.borderLeft = borderLeft;
 
     if (dirtyChain && borderChanged) {
         el->isDirty = true;
@@ -640,21 +664,50 @@ uint32_t PackColor(const Color &color) {
     return packedColor;
 }
 
+uint32_t PackFloatsToInt(const float &a = 0.0f, const float &b = 0.0f,
+                         const float &c = 0.0f, const float &d = 0.0f) {
+    uint32_t packedBorderSize;
+    unsigned int topBits = static_cast<unsigned int>(std::clamp(a, 0.0f, 255.0f));
+    unsigned int rightBits = static_cast<unsigned int>(std::clamp(b, 0.0f, 255.0f))
+                             << 8;
+    unsigned int bottomBits = static_cast<unsigned int>(std::clamp(c, 0.0f, 255.0f))
+                              << 16;
+    unsigned int leftBits = static_cast<unsigned int>(std::clamp(d, 0.0f, 255.0f))
+                            << 24;
+    packedBorderSize = topBits | rightBits | bottomBits | leftBits;
+    return packedBorderSize;
+}
+
 static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
                        const StyleStoreState &style) {
     float x = geometry.absoluteX;
     float y = geometry.absoluteY;
     float w = geometry.width;
     float h = geometry.height;
-    float borderWidth = style.borderWidth;
-    float cornerRadiusTopLeft = style.cornerRadiusTopLeft;
-    float cornerRadiusTopRight = style.cornerRadiusTopRight;
-    float cornerRadiusBottomLeft = style.cornerRadiusBottomLeft;
-    float cornerRadiusBottomRight = style.cornerRadiusBottomRight;
+    float cornerTL = style.cornerRadiusTopLeft;
+    float cornerTR = style.cornerRadiusTopRight;
+    float cornerBL = style.cornerRadiusBottomLeft;
+    float cornerBR = style.cornerRadiusBottomRight;
 
-    // packing color
-    uint32_t packedColor = PackColor(style.color);
+    uint32_t packedElementColor = PackColor(style.color);
+    uint32_t packedBorderColor = PackColor(style.borderColor);
+    uint32_t packedBorder = PackFloatsToInt(style.borderTop, style.borderRight,
+                                            style.borderBottom, style.borderLeft);
+    // corner variable names were too long and the auto format kept doing werid stuff
+    // so i broke consistency by just abbreviating
+    uint32_t packedCorner = PackFloatsToInt(cornerTL, cornerTR, cornerBL, cornerBR);
+
     ElementInstance newInstance;
+
+    newInstance.transform[0] = x;
+    newInstance.transform[1] = y;
+    newInstance.transform[2] = w;
+    newInstance.transform[3] = h;
+
+    newInstance.packedColor = packedElementColor;
+    newInstance.borderInfo[0] = packedBorder;
+    newInstance.borderInfo[1] = packedBorderColor;
+    newInstance.cornerInfo = packedCorner;
 
     frame.instances.push_back(newInstance);
 }
@@ -752,17 +805,17 @@ void Renderer::Init() {
         return;
     }
     DefaultShader.Load("default.vert", "default.frag");
-    MainVAO.Bind();
-    MainVBO.Bind();
+    // MainVAO.Bind();
+    // MainVBO.Bind();
     // MainEBO.Bind();
 
-    MainVAO.LinkAttrib(MainVBO, TransformLayout);
-    MainVAO.LinkAttrib(MainVBO, PackedColor);
-    MainVAO.LinkAttrib(MainVBO, BorderStyle);
-    MainVAO.LinkAttrib(MainVBO, CornerStyle);
+    // MainVAO.LinkAttrib(MainVBO, TransformLayout);
+    // MainVAO.LinkAttrib(MainVBO, PackedColor);
+    // MainVAO.LinkAttrib(MainVBO, BorderStyle);
+    // MainVAO.LinkAttrib(MainVBO, CornerStyle);
 
-    MainVAO.Unbind();
-    MainVBO.Unbind();
+    // MainVAO.Unbind();
+    // MainVBO.Unbind();
     // MainEBO.Unbind();
     resolutionUniform = glGetUniformLocation(DefaultShader.ID, "u_resolution");
     initialized = true;
@@ -809,6 +862,14 @@ void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
     for (const DrawCommand &cmd : commandsData) {
         if (cmd.instanceCount == 0)
             continue;
+
+        uintptr_t baseOffset = cmd.instanceOffset * sizeof(ElementInstance);
+        MainVAO.LinkAttrib(MainVBO, TransformLayout, baseOffset);
+        MainVAO.LinkAttrib(MainVBO, PackedColor, baseOffset);
+        MainVAO.LinkAttrib(MainVBO, BorderStyle, baseOffset);
+        MainVAO.LinkAttrib(MainVBO, CornerStyle, baseOffset);
+        MainVBO.Bind();
+
         if (cmd.useScissor) {
             glEnable(GL_SCISSOR_TEST);
             glScissor(cmd.scissorBox.x, cmd.scissorBox.y, cmd.scissorBox.w,
@@ -896,7 +957,7 @@ bool VerticalContainer::UpdateLayout(UIStateTables &data, LayoutContext &context
         data.geometry[id].width = std::max(oldWidth, fitWidth);
 
         if (data.geometry[id].width != oldWidth) {
-            context.MarkParentChainDirty(id);
+            context.MarkParentChainDirty(id, id);
             changed = true;
         }
     }
@@ -917,7 +978,7 @@ bool VerticalContainer::UpdateLayout(UIStateTables &data, LayoutContext &context
 
         if (oldChildX != data.geometry[childId].localX ||
             oldChildY != data.geometry[childId].localY) {
-            context.MarkDirty(childId);
+            context.MarkDirty(childId, id);
             changed = true;
         }
 
@@ -928,7 +989,7 @@ bool VerticalContainer::UpdateLayout(UIStateTables &data, LayoutContext &context
         float oldHeight = data.geometry[id].height;
         data.geometry[id].height = targetY;
         if (data.geometry[id].height != oldHeight) {
-            context.MarkParentChainDirty(id);
+            context.MarkParentChainDirty(id, id);
             changed = true;
         }
     }

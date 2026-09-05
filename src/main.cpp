@@ -41,6 +41,10 @@ int main() {
         return -1;
     }
 
+    std::cout << "GPU Vendor: " << glGetString(GL_VENDOR) << std::endl;
+    std::cout << "GPU Renderer: " << glGetString(GL_RENDERER) << std::endl;
+    std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
+
     glViewport(0, 0, resolution[0], resolution[1]);
 
     UIScene uiScene;

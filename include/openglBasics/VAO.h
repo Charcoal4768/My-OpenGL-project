@@ -20,7 +20,7 @@ class VAO {
     VAO();
 
     // links a VBO to the VAO
-    void LinkAttrib(VBO &VBO, Layout newLayout);
+    void LinkAttrib(VBO &VBO, Layout newLayout, uintptr_t baseOffset = 0);
     void Bind();
     void Unbind();
     void Delete();

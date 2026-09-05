@@ -21,6 +21,9 @@ constexpr float F_UNSET = -1.0f;
 constexpr int I_UNSET = -1;
 typedef std::vector<std::unique_ptr<UIElement>> pointerVector;
 
+// Major refactor, switching from standard drawing + batching to:
+// instanced drawing + batching
+
 // Vertex Struct no longer neeced
 // struct Vertex {
 //     GLfloat pos[3];
@@ -106,8 +109,11 @@ struct StyleStoreState {
 
     float prefferedWidthPercent = F_UNSET;
     float prefferedHeightPercent = F_UNSET;
-    float borderWidth = 0.0f;
     Color borderColor = {0.0f, 0.0f, 0.0f, 1.0f};
+    float borderTop = 0.0f;
+    float borderBottom = 0.0f;
+    float borderRight = 0.0f;
+    float borderLeft = 0.0f;
     float cornerRadiusTopLeft = 0.0f;
     float cornerRadiusTopRight = 0.0f;
     float cornerRadiusBottomLeft = 0.0f;
@@ -162,13 +168,13 @@ class UIElement {
 class LayoutContext {
   private:
     const pointerVector *currentElementReferences = nullptr;
-    // layout engine will set this
-    // and it will clear and update this
+    const std::vector<int> *parentIdLookup = nullptr;
     friend class LayoutManager;
 
   public:
-    void MarkDirty(int id);
-    void MarkParentChainDirty(int id);
+    void MarkDirty(int targetId, int callerId);
+    void MarkParentChainDirty(int targetId, int callerId);
+    bool IsChildOf(int childId, int parentId) const;
 };
 
 class Hierarchy {
@@ -311,11 +317,13 @@ class UIScene {
     void MarkParentChainDirty(int id);
     void EditElementShape(int id, const GeometryStoreState &props, bool dirtyChain);
     void EditElementColor(int id, const Color &props, bool dirtyChain);
-    void EditElementBorder(int id, float borderWidth, bool dirtyChain);
+    void EditElementBorder(int id, float borderTop, float borderRight,
+                           float borderBottom, float borderLeft,
+                           bool dirtyChain = true);
     void EditElementBorderColor(int id, const Color &borderColor, bool dirtyChain);
     void EditElementCornerRadius(int id, float topLeft, float topRight,
                                  float bottomLeft, float bottomRight,
-                                 bool dirtyChain);
+                                 bool dirtyChain = true);
     void EditElementPadding(int id, float padding, bool dirtyChain);
     void StepFrame(std::array<float, 2> &resolution);
     void AddChild(int parentId, int childId);
@@ -381,7 +389,10 @@ class UIScene {
         elementAppearance.cornerRadiusTopRight = 0.0f;
         elementAppearance.cornerRadiusBottomLeft = 0.0f;
         elementAppearance.cornerRadiusBottomRight = 0.0f;
-        elementAppearance.borderWidth = 0.0f;
+        elementAppearance.borderBottom = 0.0f;
+        elementAppearance.borderLeft = 0.0f;
+        elementAppearance.borderRight = 0.0f;
+        elementAppearance.borderTop = 0.0f;
         elementAppearance.borderColor = {0.0f, 0.0f, 0.0f, 1.0f};
         elementAppearance.padding = 0.0f;
 
