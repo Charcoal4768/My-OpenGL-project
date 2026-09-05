@@ -17,7 +17,7 @@ The engine is in a stable but very primitive state as of now. I plan on adding s
 - Shader flags to allow for corner rounding, borders, anti-aliasing and more using SDFs.
 - Instanced rendering
 - Texture support
-I am currently working on these changes and additions. The current UI Engine can be used to make very simple graphical apps but does not have capabilities for input handling, displaying text and alot of other expected modern features. Despite this, it is a UI Engine and it does work.
+I am currently working on these changes and additions (check out the other branches for more info). The current UI Engine can be used to make very simple graphical apps but does not have capabilities for input handling, displaying text and alot of other expected modern features. Despite this, it is a UI Engine and it does work.
 main.cpp is a demo file.
 
 ### Requires glad, KHRplatform and glfw to function. 
