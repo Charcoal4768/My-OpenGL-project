@@ -41,6 +41,10 @@ int main() {
         return -1;
     }
 
+    std::cout << "GPU Vendor: " << glGetString(GL_VENDOR) << std::endl;
+    std::cout << "GPU Renderer: " << glGetString(GL_RENDERER) << std::endl;
+    std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
+
     glViewport(0, 0, resolution[0], resolution[1]);
 
     UIScene uiScene;
@@ -62,18 +66,23 @@ int main() {
     uiScene.AddChild(container2, rect3);
     uiScene.AddChild(container, rect4);
 
-    uiScene.EditElementShape(root, {0.0f, 0.0f, resolution[0], resolution[1]},
-                             true);
+    uiScene.EditElementShape(root, {0.0f, 0.0f, resolution[0], resolution[1]}, true);
     uiScene.EditElementColor(root, {0.2f, 0.2f, 0.6f, 1.0f}, true);
 
     uiScene.EditElementShape(container, {200.0f, 20.0f, 30.0f, 30.0f}, true);
     uiScene.EditElementColor(container, {0.5f, 0.1f, 0.5f, 1.0f}, true);
+    uiScene.EditElementPadding(container, 10.0f, true);
+    uiScene.EditElementCornerRadius(container, 5.0f, 5.0f, 5.0f, 5.0f, true);
+    uiScene.EditElementBorder(container, 2.0f, 2.0f, 2.0f, 2.0f, true);
+    uiScene.EditElementBorderColor(container, {1.0f, 1.0f, 1.0f, 1.0f}, true);
 
     uiScene.EditElementShape(container2, {180.0f, 40.0f, 10.0f, 20.0f}, true);
     uiScene.EditElementColor(container2, {1.0f, 0.5f, 0.1f, 1.0f}, true);
+    uiScene.EditElementPadding(container2, 5.0f, true);
 
     uiScene.EditElementShape(rect1, {0.0f, 0.0f, 60.0f, 40.0f}, true);
     uiScene.EditElementColor(rect1, {0.3f, 1.0f, 0.4f, 1.0f}, true);
+    uiScene.EditElementCornerRadius(rect1, 20.0f, 20.0f, 20.0f, 20.0f, true);
 
     uiScene.EditElementShape(rect2, {0.0f, 0.0f, 120.0f, 80.0f}, true);
     uiScene.EditElementColor(rect2, {0.2f, 0.8f, 0.2f, 1.0f}, true);
@@ -86,14 +95,12 @@ int main() {
 
     auto &c = uiScene.Get<VerticalContainer>(container);
     auto &c2 = uiScene.Get<VerticalContainer>(container2);
-    c.padding = 15.00f;
     c.centerHorizontally = true;
     c.fitContentHeight = true;
     c.fitContentWidth = true;
     c.resizeChildren = true;
     c.clipChildren = true;
 
-    c2.padding = 5.50f;
     c2.centerHorizontally = true;
     c2.fitContentHeight = true;
     c2.fitContentWidth = true;
@@ -107,8 +114,7 @@ int main() {
         double currentTime = glfwGetTime();
         frameCount++;
         if (currentTime - lastTime >= 1.0) {
-            std::string title =
-                "UI Engine - " + std::to_string(frameCount) + " FPS";
+            std::string title = "UI Engine - " + std::to_string(frameCount) + " FPS";
             glfwSetWindowTitle(window, title.c_str());
             frameCount = 0;
             lastTime = currentTime;
