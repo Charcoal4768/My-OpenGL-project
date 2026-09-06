@@ -130,6 +130,12 @@ struct UIStateTables {
     std::vector<StyleStoreState> style;
 };
 
+// UIElements.h
+
+std::array<float, 2> ApplyStyle(float computedWidth, float computedHeight,
+                                float parentWidth, float parentHeight,
+                                const StyleStoreState &style);
+
 // ui element dosent function without a manager
 class UIElement {
   public:

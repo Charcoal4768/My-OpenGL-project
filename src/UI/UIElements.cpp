@@ -16,6 +16,10 @@ void UIScene::SetRootViewport(float width, float height) {
             rootShape.width = width;
             rootShape.height = height;
             ptrStore[rootId]->isDirty = true;
+            for (const auto &element : ptrStore) {
+                if (element)
+                    element->isDirty = true;
+            }
             frameDataRebuild = true;
         }
     }
@@ -618,8 +622,9 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
         return;
     }
 
-    bool rebuildFrameData =
-        MainLayout.Run(currentTraversalData, ptrStore, dataTables);
+    bool rebuildFrameData = frameDataRebuild || MainLayout.Run(currentTraversalData,
+                                                               ptrStore, dataTables);
+    frameDataRebuild = false;
 
     RenderData frameGraphicalData = MainBatcher.GetFrameData();
     bool dataEmpty = frameGraphicalData.empty();

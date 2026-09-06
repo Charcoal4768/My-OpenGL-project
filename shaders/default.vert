@@ -17,6 +17,7 @@ out vec2 v_LocalUV;
 flat out vec4 v_BorderWidths;
 flat out vec4 v_BorderColor;
 flat out vec4 v_CornerRadii;
+flat out vec2 v_BoxSize;
 
 const vec2 quadVertices[6] = vec2[](
     vec2(0.0, 0.0), // Triangle 1
@@ -42,6 +43,7 @@ void main()
    gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
 
    v_Color = a_PackedColor;
+   v_BoxSize = elementSize;
 
    v_CornerRadii.x = float(a_CornerInfo & 0xFFu); //0xFF = 11111111 = 8 bits
    v_CornerRadii.y = float((a_CornerInfo >> 8u) & 0xFFu);
