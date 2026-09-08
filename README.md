@@ -2,6 +2,8 @@
 
 This is a basic UI engine I have been working on as a personal project. The engine contains a renderer, a batcher, a layout hierarchy manager, and an object storage / lifetime manager.
 
+**NOTE:** *`main.cpp` is provided as a basic layout demonstration scene. It is not part of the UI engine. The main engine implementation lives inside ``src/UI/`` and ``include/UI/``.
+
 ### Core Loop
 Every frame, the viewport resolution is passed to the engine and `StepFrame()` is called. Based on simple hierarchy dirtiness checks, this function determines whether or not to re-evaluate the layout, compute absolute positioning of elements, rebuild the frame data, upload new instance buffers to the GPU, or update the constructed draw commands.
 
