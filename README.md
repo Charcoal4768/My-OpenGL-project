@@ -12,7 +12,7 @@ The end goal is for this engine to be a simple-to-use graphics engine that makes
 
 ## Future Plans
 The engine is currently in a stable but primitive state. I plan on adding support for:
-- Text rendering using pre-existing engine features (font glyph atlases).
+- Text rendering using pre-existing engine features (SDF based font glyph atlases).
 - Texture support.
 
 I am currently working on these additions (check out the other development branches for more information). The current UI engine can be used to make simple graphical applications, but it does not yet handle input events, mouse interaction, or display text. Despite these limitations, it functions fully as a foundational UI engine. 
