@@ -91,12 +91,17 @@ bool LayoutManager::Run(const TraversalData &traversal,
         UIElement *el = elementPointers[elementId].get();
         if (!el)
             continue;
+
+        GeometryStoreState &elementShape = dataTables.geometry[elementId];
+        const float oldAbsoluteX = elementShape.absoluteX;
+        const float oldAbsoluteY = elementShape.absoluteY;
+
         if (el->isDirty) {
             if (el->UpdateLayout(dataTables, context) && (el->id != rootId)) {
                 rebuildRender = true; // render commands need to be rebuilt
             }
         }
-        GeometryStoreState &elementShape = dataTables.geometry[elementId];
+
         if (parentId != I_UNSET) {
             GeometryStoreState &parentShape = dataTables.geometry[parentId];
             elementShape.absoluteX = parentShape.absoluteX + elementShape.localX;
@@ -106,6 +111,11 @@ bool LayoutManager::Run(const TraversalData &traversal,
                 elementShape.localX != F_UNSET ? elementShape.localX : 0.0f;
             elementShape.absoluteY =
                 elementShape.localY != F_UNSET ? elementShape.localY : 0.0f;
+        }
+
+        if (elementShape.absoluteX != oldAbsoluteX ||
+            elementShape.absoluteY != oldAbsoluteY) {
+            rebuildRender = true;
         }
     }
     context.currentElementReferences = nullptr;
@@ -230,9 +240,16 @@ void UIScene::EditElementShape(int id, const GeometryStoreState &newShape,
     if (!positionOrSizeChanged)
         return;
 
-    elementShape = newShape;
-    // elementShape.absoluteX = oldAbsX;
-    // elementShape.absoluteY = oldAbsY;
+    elementShape.localX = newShape.localX;
+    elementShape.localY = newShape.localY;
+    elementShape.width = newShape.width;
+    elementShape.height = newShape.height;
+
+    // The layout pass owns absolute positioning. Preserve the new local shape,
+    // but force the absolute values to be recalculated from the parent chain so
+    // we don't keep stale screen-space coordinates around between edits.
+    elementShape.absoluteX = F_UNSET;
+    elementShape.absoluteY = F_UNSET;
 
     if (dirtyChain) {
         el->isDirty = true;
@@ -372,6 +389,61 @@ void UIScene::EditElementPadding(int id, float padding, bool dirtyChain) {
     elementPadding = padding;
 
     if (dirtyChain && paddingChanged) {
+        el->isDirty = true;
+        if (el->parentId != -1 && ptrStore[el->parentId]) {
+            MarkParentChainDirty(id);
+        }
+    }
+}
+
+void UIScene::EditElementShadow(int id, float blur, float offsetX, float offsetY,
+                                const Color &shadowColor, bool dirtyChain) {
+    assert(id >= 0);
+    assert(id < ptrStore.size());
+    assert(ptrStore[id] != nullptr);
+
+    UIElement *el = ptrStore[id].get();
+
+    StyleStoreState &elementStyle = dataTables.style[id];
+
+    bool shadowChanged =
+        (elementStyle.shadowBlur != blur || elementStyle.shadowOffsetX != offsetX ||
+         elementStyle.shadowOffsetY != offsetY ||
+         elementStyle.shadowColor != shadowColor);
+
+    if (!shadowChanged)
+        return;
+
+    elementStyle.shadowBlur = blur;
+    elementStyle.shadowOffsetX = offsetX;
+    elementStyle.shadowOffsetY = offsetY;
+    elementStyle.shadowColor = shadowColor;
+
+    if (dirtyChain && shadowChanged) {
+        el->isDirty = true;
+        if (el->parentId != -1 && ptrStore[el->parentId]) {
+            MarkParentChainDirty(id);
+        }
+    }
+}
+
+void UIScene::EditElementVisibility(int id, bool hidden, bool dirtyChain) {
+    assert(id >= 0);
+    assert(id < ptrStore.size());
+    assert(ptrStore[id] != nullptr);
+
+    UIElement *el = ptrStore[id].get();
+
+    bool &elementHidden = dataTables.style[id].hidden;
+
+    bool visibilityChanged = (elementHidden != hidden);
+
+    if (!visibilityChanged)
+        return;
+
+    elementHidden = hidden;
+
+    if (dirtyChain && visibilityChanged) {
         el->isDirty = true;
         if (el->parentId != -1 && ptrStore[el->parentId]) {
             MarkParentChainDirty(id);
@@ -671,7 +743,7 @@ uint32_t PackColor(const Color &color) {
 
 uint32_t PackFloatsToInt(const float &a = 0.0f, const float &b = 0.0f,
                          const float &c = 0.0f, const float &d = 0.0f) {
-    uint32_t packedBorderSize;
+    uint32_t packedFloats;
     unsigned int topBits = static_cast<unsigned int>(std::clamp(a, 0.0f, 255.0f));
     unsigned int rightBits = static_cast<unsigned int>(std::clamp(b, 0.0f, 255.0f))
                              << 8;
@@ -679,8 +751,80 @@ uint32_t PackFloatsToInt(const float &a = 0.0f, const float &b = 0.0f,
                               << 16;
     unsigned int leftBits = static_cast<unsigned int>(std::clamp(d, 0.0f, 255.0f))
                             << 24;
-    packedBorderSize = topBits | rightBits | bottomBits | leftBits;
-    return packedBorderSize;
+    packedFloats = topBits | rightBits | bottomBits | leftBits;
+    return packedFloats;
+}
+
+uint32_t PackArbitraryBits(const std::vector<int32_t> &values,
+                           const std::vector<uint8_t> &bitWidths,
+                           const std::vector<bool> &isSigned) {
+    uint32_t packedResult = 0;
+    uint8_t currentShift = 0;
+
+    for (size_t i = 0; i < values.size(); ++i) {
+        uint8_t width = bitWidths[i];
+        int32_t val = values[i];
+        uint32_t mask = (1u << width) - 1u;
+        uint32_t processedVal = 0;
+
+        if (isSigned[i]) {
+            int32_t bias = 1 << (width - 1);
+            int32_t minVal = -bias;
+            int32_t maxVal = bias - 1;
+            processedVal =
+                static_cast<uint32_t>(std::clamp(val, minVal, maxVal) + bias);
+        } else {
+            uint32_t maxVal = mask;
+            processedVal = static_cast<uint32_t>(
+                std::clamp(val, 0, static_cast<int32_t>(maxVal)));
+        }
+        packedResult |= (processedVal & mask) << currentShift;
+        currentShift += width;
+    }
+
+    return packedResult;
+}
+
+uint32_t getShadowInfo(const float &blur, const float &offsetX, const float &offsetY,
+                       const Color &shadowColor) {
+    const int32_t blurValue =
+        std::clamp(static_cast<int32_t>(std::lround(blur)), 0, 63);
+    const int32_t offsetXValue =
+        std::clamp(static_cast<int32_t>(std::lround(offsetX)), -32, 31);
+    const int32_t offsetYValue =
+        std::clamp(static_cast<int32_t>(std::lround(offsetY)), -32, 31);
+
+    const int32_t r = std::clamp(
+        static_cast<int32_t>(std::lround(shadowColor.r * 255.0f)), 0, 255);
+    const int32_t g = std::clamp(
+        static_cast<int32_t>(std::lround(shadowColor.g * 255.0f)), 0, 255);
+    const int32_t b = std::clamp(
+        static_cast<int32_t>(std::lround(shadowColor.b * 255.0f)), 0, 255);
+    const int32_t a = std::clamp(
+        static_cast<int32_t>(std::lround(shadowColor.a * 255.0f)), 0, 255);
+
+    const int32_t lowResR = r >> 4;
+    const int32_t lowResG = g >> 4;
+    const int32_t lowResB = b >> 4;
+    const int32_t lowResA = a >> 6;
+
+    return PackArbitraryBits(
+        {blurValue, offsetXValue, offsetYValue, lowResR, lowResG, lowResB, lowResA},
+        {6, 6, 6, 4, 4, 4, 2}, {false, true, true, false, false, false, false});
+}
+
+uint32_t getBorderAndCornerInfo(int32_t borderTop, int32_t borderRight,
+                                int32_t borderBottom, int32_t borderLeft, int32_t tl,
+                                int32_t tr, int32_t bl, int32_t br) {
+    // Keep this order consistent with the shader unpacking:
+    // top, right, bottom, left, tl, tr, bl, br
+    std::vector<int32_t> values = {borderTop, borderRight, borderBottom, borderLeft,
+                                   tl,        tr,          bl,           br};
+    std::vector<uint8_t> widths = {4, 4, 4, 4, 4, 4, 4, 4};
+    std::vector<bool> isSigned = {false, false, false, false,
+                                  false, false, false, false};
+
+    return PackArbitraryBits(values, widths, isSigned);
 }
 
 static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
@@ -696,6 +840,7 @@ static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
 
     uint32_t packedElementColor = PackColor(style.color);
     uint32_t packedBorderColor = PackColor(style.borderColor);
+
     uint32_t packedBorder = PackFloatsToInt(style.borderTop, style.borderRight,
                                             style.borderBottom, style.borderLeft);
     // corner variable names were too long and the auto format kept doing werid stuff
@@ -710,9 +855,16 @@ static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
     newInstance.transform[3] = h;
 
     newInstance.packedColor = packedElementColor;
-    newInstance.borderInfo[0] = packedBorder;
-    newInstance.borderInfo[1] = packedBorderColor;
-    newInstance.cornerInfo = packedCorner;
+    newInstance.borderColor = packedBorderColor;
+    newInstance.borderAndCornerInfo = getBorderAndCornerInfo(
+        static_cast<int32_t>(style.borderTop),
+        static_cast<int32_t>(style.borderRight),
+        static_cast<int32_t>(style.borderBottom),
+        static_cast<int32_t>(style.borderLeft), static_cast<int32_t>(cornerTL),
+        static_cast<int32_t>(cornerTR), static_cast<int32_t>(cornerBL),
+        static_cast<int32_t>(cornerBR));
+    newInstance.shadowInfo = getShadowInfo(style.shadowBlur, style.shadowOffsetX,
+                                           style.shadowOffsetY, style.shadowColor);
 
     frame.instances.push_back(newInstance);
 }
@@ -824,6 +976,8 @@ void Renderer::Init() {
     // MainEBO.Unbind();
     resolutionUniform = glGetUniformLocation(DefaultShader.ID, "u_resolution");
     initialized = true;
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     if (debug)
         std::cout << "VAO ID: " << MainVAO.ID << " | VBO ID: " << MainVBO.ID << '\n';
 }
@@ -871,9 +1025,9 @@ void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
         uintptr_t baseOffset = cmd.instanceOffset * sizeof(ElementInstance);
         MainVAO.LinkAttrib(MainVBO, TransformLayout, baseOffset);
         MainVAO.LinkAttrib(MainVBO, PackedColor, baseOffset);
-        MainVAO.LinkAttrib(MainVBO, BorderStyle, baseOffset);
-        MainVAO.LinkAttrib(MainVBO, CornerStyle, baseOffset);
-        MainVBO.Bind();
+        MainVAO.LinkAttrib(MainVBO, BorderColor, baseOffset);
+        MainVAO.LinkAttrib(MainVBO, BorderAndCornerStyle, baseOffset);
+        MainVAO.LinkAttrib(MainVBO, ShadowStyle, baseOffset);
 
         if (cmd.useScissor) {
             glEnable(GL_SCISSOR_TEST);

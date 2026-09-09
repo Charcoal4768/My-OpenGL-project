@@ -34,9 +34,10 @@ typedef std::vector<std::unique_ptr<UIElement>> pointerVector;
 
 struct __attribute__((packed)) ElementInstance {
     GLfloat transform[4];
-    GLuint packedColor;
-    GLuint borderInfo[2]; // packed 4 edge toggles and 4 color bits, space for more
-    GLuint cornerInfo;    // packed 4 corner raddii, space for future values
+    GLuint packedColor;         // rgba
+    GLuint borderColor;         // rgba
+    GLuint borderAndCornerInfo; // all edge border, all 4 corner roundness
+    GLuint shadowInfo;          // shadow blur, rgba3335, x & y offset
 };
 
 struct ScissorRect {
@@ -107,9 +108,12 @@ struct StyleStoreState {
     float maxWidth = F_UNSET;
     float maxHeight = F_UNSET;
 
+    Color color = {1.0f, 1.0f, 1.0f, 1.0f};
+    Color borderColor = {0.0f, 0.0f, 0.0f, 1.0f};
+    Color shadowColor = {0.0f, 0.0f, 0.0f, 1.0f};
+
     float prefferedWidthPercent = F_UNSET;
     float prefferedHeightPercent = F_UNSET;
-    Color borderColor = {0.0f, 0.0f, 0.0f, 1.0f};
     float borderTop = 0.0f;
     float borderBottom = 0.0f;
     float borderRight = 0.0f;
@@ -118,11 +122,12 @@ struct StyleStoreState {
     float cornerRadiusTopRight = 0.0f;
     float cornerRadiusBottomLeft = 0.0f;
     float cornerRadiusBottomRight = 0.0f;
+    float shadowBlur = 0.0f;
+    float shadowOffsetX = 0.0f;
+    float shadowOffsetY = 0.0f;
     float padding = 0.0f; // padding is applied to children, not self, so it does not
                           // affect own size
     bool hidden = false;
-
-    Color color;
 };
 
 struct UIStateTables {
@@ -260,18 +265,28 @@ class Renderer {
                           1,
                           GL_FALSE};
 
-    Layout BorderStyle = {
+    Layout BorderColor = {
         2,
-        2,
-        GL_UNSIGNED_INT,
-        GL_FALSE,
+        4,
+        GL_UNSIGNED_BYTE,
+        GL_TRUE,
         sizeof(ElementInstance),
         static_cast<uintptr_t>((4 * sizeof(float)) + (1 * sizeof(uint32_t))),
         1,
+        GL_FALSE};
+
+    Layout BorderAndCornerStyle = {
+        3,
+        1,
+        GL_UNSIGNED_INT,
+        GL_FALSE,
+        sizeof(ElementInstance),
+        static_cast<uintptr_t>((4 * sizeof(float)) + (2 * sizeof(uint32_t))),
+        1,
         GL_TRUE};
 
-    Layout CornerStyle = {
-        3,
+    Layout ShadowStyle = {
+        4,
         1,
         GL_UNSIGNED_INT,
         GL_FALSE,
@@ -331,6 +346,9 @@ class UIScene {
                                  float bottomLeft, float bottomRight,
                                  bool dirtyChain = true);
     void EditElementPadding(int id, float padding, bool dirtyChain);
+    void EditElementShadow(int id, float blur, float offsetX, float offsetY,
+                           const Color &shadowColor, bool dirtyChain);
+    void EditElementVisibility(int id, bool hidden, bool dirtyChain);
     void StepFrame(std::array<float, 2> &resolution);
     void AddChild(int parentId, int childId);
     void RemoveChild(int childId);
@@ -401,6 +419,8 @@ class UIScene {
         elementAppearance.borderTop = 0.0f;
         elementAppearance.borderColor = {0.0f, 0.0f, 0.0f, 1.0f};
         elementAppearance.padding = 0.0f;
+
+        // lets stop setting these things, they're already set by default
 
         dataTables.geometry.push_back(elementShape);
         dataTables.style.push_back(elementAppearance);
