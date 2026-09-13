@@ -8,6 +8,8 @@
 #include <openglBasics/VAO.h>
 #include <openglBasics/VBO.h>
 #include <openglBasics/shaderclass.h>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 class UIElement;
@@ -73,8 +75,12 @@ struct RenderOp {
 };
 
 struct RenderData {
+    const int defaultReserve = 100;
     std::vector<ElementInstance> instances;
     std::vector<DrawCommand> commands;
+
+    std::unordered_map<int, size_t> indexByInstanceId;
+    std::unordered_set<int> dirtyElements;
     bool empty() const { return (instances.empty() || commands.empty()); }
 };
 
@@ -149,6 +155,8 @@ class UIElement {
     bool fitContentWidth = false;
     bool clipChildren = false;
 
+    uint32_t lastLayoutRunFrame;
+
     int id = I_UNSET;
     int parentId = I_UNSET;
 
@@ -218,8 +226,8 @@ class LayoutManager {
 
   public:
     LayoutContext context;
-    bool Run(const TraversalData &traversal, pointerVector &elementPointers,
-             UIStateTables &dataTables);
+    std::vector<int> Run(const TraversalData &traversal,
+                         pointerVector &elementPointers, UIStateTables &dataTables);
     void SetRoot(int id);
     void SetDebug(bool enabled);
 };
@@ -232,7 +240,12 @@ class RenderBatcher {
   public:
     const RenderData &ReBuildFrameData(UIStateTables &dataTables,
                                        const std::vector<RenderOp> &displayList,
+                                       const std::vector<int> &dirtyElements,
                                        float viewportHeight);
+    const RenderData &SmartReBuildFrameData(UIStateTables &dataTables,
+                                            const std::vector<RenderOp> &displayList,
+                                            const std::vector<int> &dirtyElements,
+                                            float viewportHeight);
     const RenderData &GetFrameData() const;
     // prepare Verticies, indicies, cmd list
     void SetDebug(bool enabled);
