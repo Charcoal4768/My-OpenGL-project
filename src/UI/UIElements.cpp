@@ -75,42 +75,59 @@ std::array<float, 2> ApplyStyle(float computedWidth, float computedHeight,
 //     context.currentElementReferences = &elementPointers;
 // }
 
-bool LayoutManager::Run(const TraversalData &traversal,
-                        pointerVector &elementPointers, UIStateTables &dataTables) {
-    bool rebuildRender = false;
+std::vector<int> LayoutManager::Run(const TraversalData &traversal,
+                                    pointerVector &elementPointers,
+                                    UIStateTables &dataTables) {
+    std::vector<int> dirtyElementIds = {};
+    std::unordered_set<int> dirtyElementCheck;
+
     if (elementPointers.back() == nullptr)
-        return rebuildRender;
+        return dirtyElementIds;
+
     context.currentElementReferences = &elementPointers;
     context.parentIdLookup = &traversal.parentIdLookup;
+
     for (int elementId : traversal.drawOrder) {
         int parentId = (elementId < traversal.parentIdLookup.size())
                            ? traversal.parentIdLookup[elementId]
                            : I_UNSET;
         if (parentId == I_UNSET && (elementId != rootId))
             continue;
+
         UIElement *el = elementPointers[elementId].get();
-        if (!el)
+
+        if (!el || !el->isDirty)
             continue;
-        if (el->isDirty) {
-            if (el->UpdateLayout(dataTables, context) && (el->id != rootId)) {
-                rebuildRender = true; // render commands need to be rebuilt
+
+        GeometryStoreState &elementShape = dataTables.geometry[elementId];
+        const float oldAbsoluteX = elementShape.absoluteX;
+        const float oldAbsoluteY = elementShape.absoluteY;
+
+        if (el->UpdateLayout(dataTables, context) && (el->id != rootId)) {
+            if (dirtyElementCheck.insert(elementId).second) {
+                dirtyElementIds.push_back(elementId);
             }
         }
-        GeometryStoreState &elementShape = dataTables.geometry[elementId];
+
         if (parentId != I_UNSET) {
             GeometryStoreState &parentShape = dataTables.geometry[parentId];
             elementShape.absoluteX = parentShape.absoluteX + elementShape.localX;
             elementShape.absoluteY = parentShape.absoluteY + elementShape.localY;
         } else {
-            elementShape.absoluteX =
-                elementShape.localX != F_UNSET ? elementShape.localX : 0.0f;
-            elementShape.absoluteY =
-                elementShape.localY != F_UNSET ? elementShape.localY : 0.0f;
+            elementShape.absoluteX = elementShape.localX;
+            elementShape.absoluteY = elementShape.localY;
+        }
+
+        if (elementShape.absoluteX != oldAbsoluteX ||
+            elementShape.absoluteY != oldAbsoluteY) {
+            if (dirtyElementCheck.insert(elementId).second) {
+                dirtyElementIds.push_back(elementId);
+            }
         }
     }
     context.currentElementReferences = nullptr;
     context.parentIdLookup = nullptr;
-    return rebuildRender;
+    return dirtyElementIds;
 }
 
 void UIScene::MarkDirty(int id) {
@@ -230,9 +247,18 @@ void UIScene::EditElementShape(int id, const GeometryStoreState &newShape,
     if (!positionOrSizeChanged)
         return;
 
-    elementShape = newShape;
-    // elementShape.absoluteX = oldAbsX;
-    // elementShape.absoluteY = oldAbsY;
+    elementShape.localX = newShape.localX;
+    elementShape.localY = newShape.localY;
+    elementShape.width = newShape.width;
+    elementShape.height = newShape.height;
+
+    // The layout pass owns absolute positioning. Preserve the new local shape,
+    // but force the absolute values to be recalculated from the parent chain so
+    // we don't keep stale screen-space coordinates around between edits.
+    elementShape.absoluteX = F_UNSET;
+    elementShape.absoluteY = F_UNSET;
+
+    frameDataRebuild = true;
 
     if (dirtyChain) {
         el->isDirty = true;
@@ -242,21 +268,30 @@ void UIScene::EditElementShape(int id, const GeometryStoreState &newShape,
     }
 }
 
-void UIScene::EditElementColor(int id, const Color &newColor, bool dirtyChain) {
+static colorInfo PackColor(const Color &color) {
+    colorInfo packed;
+    packed.setRGBA8F(color.r, color.g, color.b, color.a);
+    return packed;
+}
+
+void UIScene::EditElementColor(int id, Color newColor, bool dirtyChain) {
     assert(id >= 0);
     assert(id < ptrStore.size());
     assert(ptrStore[id] != nullptr);
 
     UIElement *el = ptrStore[id].get();
 
-    Color &elementColor = dataTables.style[id].color;
+    colorInfo &elementColor = dataTables.style[id].color;
+    const colorInfo packedColor = PackColor(newColor);
 
-    bool colorChanged = (elementColor != newColor);
+    bool colorChanged = elementColor.RGBA8 != packedColor.RGBA8;
 
     if (!colorChanged)
         return;
 
-    elementColor = newColor;
+    elementColor = packedColor;
+
+    frameDataRebuild = true;
 
     if (dirtyChain && colorChanged) {
         el->isDirty = true;
@@ -290,6 +325,8 @@ void UIScene::EditElementBorder(int id, float borderTop = 0.0f,
     elementStyle.borderBottom = borderBottom;
     elementStyle.borderLeft = borderLeft;
 
+    frameDataRebuild = true;
+
     if (dirtyChain && borderChanged) {
         el->isDirty = true;
         if (el->parentId != -1 && ptrStore[el->parentId]) {
@@ -298,22 +335,25 @@ void UIScene::EditElementBorder(int id, float borderTop = 0.0f,
     }
 }
 
-void UIScene::EditElementBorderColor(int id, const Color &borderColor,
-                                     bool dirtyChain) {
+void UIScene::EditElementBorderColor(int id, Color borderColor, bool dirtyChain) {
     assert(id >= 0);
     assert(id < ptrStore.size());
     assert(ptrStore[id] != nullptr);
 
     UIElement *el = ptrStore[id].get();
 
-    Color &elementBorderColor = dataTables.style[id].borderColor;
+    colorInfo &elementBorderColor = dataTables.style[id].borderColor;
+    const colorInfo packedBorderColor = PackColor(borderColor);
 
-    bool borderColorChanged = (elementBorderColor != borderColor);
+    bool borderColorChanged =
+        elementBorderColor.RGBA8 != packedBorderColor.RGBA8;
 
     if (!borderColorChanged)
         return;
 
-    elementBorderColor = borderColor;
+    elementBorderColor = packedBorderColor;
+
+    frameDataRebuild = true;
 
     if (dirtyChain && borderColorChanged) {
         el->isDirty = true;
@@ -347,6 +387,8 @@ void UIScene::EditElementCornerRadius(int id, float topLeft, float topRight,
     elementStyle.cornerRadiusBottomLeft = bottomLeft;
     elementStyle.cornerRadiusBottomRight = bottomRight;
 
+    frameDataRebuild = true;
+
     if (dirtyChain && cornerChanged) {
         el->isDirty = true;
         if (el->parentId != -1 && ptrStore[el->parentId]) {
@@ -371,7 +413,69 @@ void UIScene::EditElementPadding(int id, float padding, bool dirtyChain) {
 
     elementPadding = padding;
 
+    frameDataRebuild = true;
+
     if (dirtyChain && paddingChanged) {
+        el->isDirty = true;
+        if (el->parentId != -1 && ptrStore[el->parentId]) {
+            MarkParentChainDirty(id);
+        }
+    }
+}
+
+void UIScene::EditElementShadow(int id, float blur, float offsetX, float offsetY,
+                                Color shadowColor, bool dirtyChain) {
+    assert(id >= 0);
+    assert(id < ptrStore.size());
+    assert(ptrStore[id] != nullptr);
+
+    UIElement *el = ptrStore[id].get();
+
+    StyleStoreState &elementStyle = dataTables.style[id];
+    const colorInfo packedShadowColor = PackColor(shadowColor);
+
+    bool shadowChanged =
+        (elementStyle.shadowBlur != blur || elementStyle.shadowOffsetX != offsetX ||
+         elementStyle.shadowOffsetY != offsetY ||
+         elementStyle.shadowColor.RGBA8 != packedShadowColor.RGBA8);
+
+    if (!shadowChanged)
+        return;
+
+    elementStyle.shadowBlur = blur;
+    elementStyle.shadowOffsetX = offsetX;
+    elementStyle.shadowOffsetY = offsetY;
+    elementStyle.shadowColor = packedShadowColor;
+
+    frameDataRebuild = true;
+
+    if (dirtyChain && shadowChanged) {
+        el->isDirty = true;
+        if (el->parentId != -1 && ptrStore[el->parentId]) {
+            MarkParentChainDirty(id);
+        }
+    }
+}
+
+void UIScene::EditElementVisibility(int id, bool hidden, bool dirtyChain) {
+    assert(id >= 0);
+    assert(id < ptrStore.size());
+    assert(ptrStore[id] != nullptr);
+
+    UIElement *el = ptrStore[id].get();
+
+    bool &elementHidden = dataTables.style[id].hidden;
+
+    bool visibilityChanged = (elementHidden != hidden);
+
+    if (!visibilityChanged)
+        return;
+
+    elementHidden = hidden;
+
+    frameDataRebuild = true;
+
+    if (dirtyChain && visibilityChanged) {
         el->isDirty = true;
         if (el->parentId != -1 && ptrStore[el->parentId]) {
             MarkParentChainDirty(id);
@@ -533,6 +637,7 @@ void UIScene::AddChild(int parentId, int childId) {
     parent->childIds.push_back(child->id);
     child->parentId = parent->id;
     parent->isDirty = true;
+    frameDataRebuild = true;
     MainHierarchy.hirearchyDirty = true; // gonna make this something that takes
                                          // element ID which triggered rebuild
                                          // into account
@@ -554,6 +659,7 @@ void UIScene::RemoveChild(int childId) {
         std::swap(childIds[instance], childIds.back());
         childIds.pop_back();
     }
+    frameDataRebuild = true;
     MainHierarchy.hirearchyDirty = true;
 }
 
@@ -622,22 +728,24 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
         return;
     }
 
-    bool rebuildFrameData = frameDataRebuild || MainLayout.Run(currentTraversalData,
-                                                               ptrStore, dataTables);
-    frameDataRebuild = false;
+    std::vector<int> dirtyElementIds =
+        MainLayout.Run(currentTraversalData, ptrStore, dataTables);
 
-    RenderData frameGraphicalData = MainBatcher.GetFrameData();
-    bool dataEmpty = frameGraphicalData.empty();
-    if (dataEmpty || rebuildFrameData) {
-        frameGraphicalData = MainBatcher.ReBuildFrameData(
-            dataTables, currentTraversalData.displayList, resolution[1]);
+    const RenderData &cachedFrameGraphicalData = MainBatcher.GetFrameData();
+    bool dataEmpty = cachedFrameGraphicalData.empty();
+    const RenderData *currentGraphicalData = &cachedFrameGraphicalData;
+
+    if (dataEmpty || !dirtyElementIds.empty()) {
+        currentGraphicalData = &MainBatcher.SmartReBuildFrameData(
+            dataTables, currentTraversalData.displayList, dirtyElementIds,
+            resolution[1]);
         if (debug)
-            std::cout << "Rebuilding Frame" << "| Layout dirty |" << rebuildFrameData
-                      << "| Data Empty | " << dataEmpty << '\n';
+            std::cout << "Rebuilding Frame" << "| Layout dirty |"
+                      << !dirtyElementIds.empty() << "| Data Empty | " << dataEmpty
+                      << '\n';
     }
 
-    const RenderData &currentGraphicalData = frameGraphicalData;
-    if (currentGraphicalData.empty()) {
+    if (currentGraphicalData->empty()) {
         if (debug)
             std::cout << "Data Empty" << '\n';
         return;
@@ -647,44 +755,143 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
         MainRenderer.Init();
 
     if (debug)
-        std::cout << "Vertices: " << currentGraphicalData.instances.size() * 6
-                  << " | instances: " << currentGraphicalData.instances.size()
-                  << " | Commands: " << currentGraphicalData.commands.size() << '\n';
+        std::cout << "Vertices: " << currentGraphicalData->instances.size() * 6
+                  << " | instances: " << currentGraphicalData->instances.size()
+                  << " | Commands: " << currentGraphicalData->commands.size()
+                  << '\n';
 
-    MainRenderer.UploadFrame(currentGraphicalData);
-    MainRenderer.DrawFrame(currentGraphicalData.commands, resolution);
+    MainRenderer.UploadFrame(*currentGraphicalData);
+    MainRenderer.DrawFrame(currentGraphicalData->commands, resolution);
 }
 
-uint32_t PackColor(const Color &color) {
-    uint32_t packedColor;
-    unsigned int rBits =
-        static_cast<unsigned int>(std::clamp(color.r * 255.0f, 0.0f, 255.0f));
-    unsigned int gBits =
-        static_cast<unsigned int>(std::clamp(color.g * 255.0f, 0.0f, 255.0f)) << 8;
-    unsigned int bBits =
-        static_cast<unsigned int>(std::clamp(color.b * 255.0f, 0.0f, 255.0f)) << 16;
-    unsigned int aBits =
-        static_cast<unsigned int>(std::clamp(color.a * 255.0f, 0.0f, 255.0f)) << 24;
-    packedColor = rBits | gBits | bBits | aBits;
-    return packedColor;
+uint8_t colorInfo::toUInt8(float val) {
+    val = std::max(0.0f, std::min(1.0f, val));
+    return static_cast<uint8_t>(std::round(val * 255.0f));
 }
 
-uint32_t PackFloatsToInt(const float &a = 0.0f, const float &b = 0.0f,
-                         const float &c = 0.0f, const float &d = 0.0f) {
-    uint32_t packedBorderSize;
-    unsigned int topBits = static_cast<unsigned int>(std::clamp(a, 0.0f, 255.0f));
-    unsigned int rightBits = static_cast<unsigned int>(std::clamp(b, 0.0f, 255.0f))
-                             << 8;
-    unsigned int bottomBits = static_cast<unsigned int>(std::clamp(c, 0.0f, 255.0f))
-                              << 16;
-    unsigned int leftBits = static_cast<unsigned int>(std::clamp(d, 0.0f, 255.0f))
-                            << 24;
-    packedBorderSize = topBits | rightBits | bottomBits | leftBits;
-    return packedBorderSize;
+void colorInfo::setRGBA8F(float r, float g, float b, float a) {
+    setRGBA88(toUInt8(r), toUInt8(g), toUInt8(b), toUInt8(a));
 }
 
-static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
-                       const StyleStoreState &style) {
+void colorInfo::setRGBA88(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    RGBA8 = (static_cast<uint32_t>(r) << 24) | (static_cast<uint32_t>(g) << 16) |
+            (static_cast<uint32_t>(b) << 8) | (static_cast<uint32_t>(a));
+}
+
+void colorInfo::setRGBA832(uint32_t color) { RGBA8 = color; }
+
+void colorInfo::setR(uint8_t r) {
+    RGBA8 = (RGBA8 & 0x00FFFFFF) | (static_cast<uint32_t>(r) << 24);
+}
+
+void colorInfo::setG(uint8_t g) {
+    RGBA8 = (RGBA8 & 0xFF00FFFF) | (static_cast<uint32_t>(g) << 16);
+}
+
+void colorInfo::setB(uint8_t b) {
+    RGBA8 = (RGBA8 & 0xFFFF00FF) | (static_cast<uint32_t>(b) << 8);
+}
+
+void colorInfo::setA(uint8_t a) {
+    RGBA8 = (RGBA8 & 0xFFFFFF00) | static_cast<uint32_t>(a);
+}
+
+void colorInfo::setRf(float r) { setR(toUInt8(r)); }
+void colorInfo::setGf(float g) { setG(toUInt8(g)); }
+void colorInfo::setBf(float b) { setB(toUInt8(b)); }
+void colorInfo::setAf(float a) { setA(toUInt8(a)); }
+
+void colorInfo::getR(uint8_t &out) {
+    out = static_cast<uint8_t>((RGBA8 >> 24) & 0xFF);
+}
+void colorInfo::getG(uint8_t &out) {
+    out = static_cast<uint8_t>((RGBA8 >> 16) & 0xFF);
+}
+void colorInfo::getB(uint8_t &out) {
+    out = static_cast<uint8_t>((RGBA8 >> 8) & 0xFF);
+}
+void colorInfo::getA(uint8_t &out) { out = static_cast<uint8_t>(RGBA8 & 0xFF); }
+
+void colorInfo::getRf(float &out) {
+    uint8_t r;
+    getR(r);
+    out = r / 255.0f;
+}
+void colorInfo::getGf(float &out) {
+    uint8_t g;
+    getG(g);
+    out = g / 255.0f;
+}
+void colorInfo::getBf(float &out) {
+    uint8_t b;
+    getB(b);
+    out = b / 255.0f;
+}
+void colorInfo::getAf(float &out) {
+    uint8_t a;
+    getA(a);
+    out = a / 255.0f;
+}
+
+uint32_t PackArbitraryBits(const std::vector<int32_t> &values,
+                           const std::vector<uint8_t> &bitWidths,
+                           const std::vector<bool> &isSigned) {
+    uint32_t packedResult = 0;
+    uint8_t currentShift = 0;
+
+    for (size_t i = 0; i < values.size(); ++i) {
+        uint8_t width = bitWidths[i];
+        int32_t val = values[i];
+        uint32_t mask = (1u << width) - 1u;
+        uint32_t processedVal = 0;
+
+        if (isSigned[i]) {
+            int32_t bias = 1 << (width - 1);
+            int32_t minVal = -bias;
+            int32_t maxVal = bias - 1;
+            processedVal =
+                static_cast<uint32_t>(std::clamp(val, minVal, maxVal) + bias);
+        } else {
+            uint32_t maxVal = mask;
+            processedVal = static_cast<uint32_t>(
+                std::clamp(val, 0, static_cast<int32_t>(maxVal)));
+        }
+        packedResult |= (processedVal & mask) << currentShift;
+        currentShift += width;
+    }
+
+    return packedResult;
+}
+
+uint32_t getShadowInfo(const float &blur, const float &offsetX,
+                       const float &offsetY) {
+    const int32_t blurValue =
+        std::clamp(static_cast<int32_t>(std::lround(blur)), 0, 63);
+    const int32_t offsetXValue =
+        std::clamp(static_cast<int32_t>(std::lround(offsetX)), -32, 31);
+    const int32_t offsetYValue =
+        std::clamp(static_cast<int32_t>(std::lround(offsetY)), -32, 31);
+
+    return PackArbitraryBits({blurValue, offsetXValue, offsetYValue},
+                             {6, 6, 6}, {false, true, true});
+}
+
+uint32_t getBorderAndCornerInfo(int32_t borderTop, int32_t borderRight,
+                                int32_t borderBottom, int32_t borderLeft, int32_t tl,
+                                int32_t tr, int32_t bl, int32_t br) {
+    // Keep this order consistent with the shader unpacking:
+    // top, right, bottom, left, tl, tr, bl, br
+    std::vector<int32_t> values = {borderTop, borderRight, borderBottom, borderLeft,
+                                   tl,        tr,          bl,           br};
+    std::vector<uint8_t> widths = {4, 4, 4, 4, 4, 4, 4, 4};
+    std::vector<bool> isSigned = {false, false, false, false,
+                                  false, false, false, false};
+
+    return PackArbitraryBits(values, widths, isSigned);
+}
+
+static ElementInstance BuildElementInstance(const GeometryStoreState &geometry,
+                                            const StyleStoreState &style) {
     float x = geometry.absoluteX;
     float y = geometry.absoluteY;
     float w = geometry.width;
@@ -694,13 +901,8 @@ static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
     float cornerBL = style.cornerRadiusBottomLeft;
     float cornerBR = style.cornerRadiusBottomRight;
 
-    uint32_t packedElementColor = PackColor(style.color);
-    uint32_t packedBorderColor = PackColor(style.borderColor);
-    uint32_t packedBorder = PackFloatsToInt(style.borderTop, style.borderRight,
-                                            style.borderBottom, style.borderLeft);
-    // corner variable names were too long and the auto format kept doing werid stuff
-    // so i broke consistency by just abbreviating
-    uint32_t packedCorner = PackFloatsToInt(cornerTL, cornerTR, cornerBL, cornerBR);
+    uint32_t packedElementColor = style.color.RGBA8;
+    uint32_t packedBorderColor = style.borderColor.RGBA8;
 
     ElementInstance newInstance;
 
@@ -709,12 +911,25 @@ static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
     newInstance.transform[2] = w;
     newInstance.transform[3] = h;
 
-    newInstance.packedColor = packedElementColor;
-    newInstance.borderInfo[0] = packedBorder;
-    newInstance.borderInfo[1] = packedBorderColor;
-    newInstance.cornerInfo = packedCorner;
+    newInstance.colorInfo = packedElementColor;
+    newInstance.borderColor = packedBorderColor;
+    newInstance.borderAndCornerInfo = getBorderAndCornerInfo(
+        static_cast<int32_t>(style.borderTop),
+        static_cast<int32_t>(style.borderRight),
+        static_cast<int32_t>(style.borderBottom),
+        static_cast<int32_t>(style.borderLeft), static_cast<int32_t>(cornerTL),
+        static_cast<int32_t>(cornerTR), static_cast<int32_t>(cornerBL),
+        static_cast<int32_t>(cornerBR));
+    newInstance.shadowInfo = getShadowInfo(style.shadowBlur, style.shadowOffsetX,
+                                           style.shadowOffsetY);
+    newInstance.shadowColor = style.shadowColor.RGBA8;
 
-    frame.instances.push_back(newInstance);
+    return newInstance;
+}
+
+static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
+                       const StyleStoreState &style) {
+    frame.instances.push_back(BuildElementInstance(geometry, style));
 }
 
 static ScissorRect BuildScissorRect(const GeometryStoreState &geometry,
@@ -725,12 +940,14 @@ static ScissorRect BuildScissorRect(const GeometryStoreState &geometry,
         static_cast<GLsizei>(geometry.width), static_cast<GLsizei>(geometry.height)};
 }
 
-const RenderData &
-RenderBatcher::ReBuildFrameData(UIStateTables &dataTables,
-                                const std::vector<RenderOp> &displayList,
-                                float viewportHeight) {
+const RenderData &RenderBatcher::ReBuildFrameData(
+    UIStateTables &dataTables, const std::vector<RenderOp> &displayList,
+    const std::vector<int> &dirtyElements, float viewportHeight) {
+
     FrameData.instances.clear();
     FrameData.commands.clear();
+    FrameData.indexByInstanceId.clear();
+    FrameData.dirtyElements.clear();
 
     DrawCommand currentBatch; // we make a new batch
     currentBatch.instanceOffset = 0;
@@ -785,6 +1002,8 @@ RenderBatcher::ReBuildFrameData(UIStateTables &dataTables,
             const StyleStoreState &style = dataTables.style[op.elementId];
             if (style.hidden)
                 break;
+
+            FrameData.indexByInstanceId[op.elementId] = FrameData.instances.size();
             AppendQuad(FrameData, geometry, style);
             currentBatch.instanceCount += 1;
             break;
@@ -798,6 +1017,58 @@ RenderBatcher::ReBuildFrameData(UIStateTables &dataTables,
     if (currentBatch.instanceCount > 0) {
         FrameData.commands.push_back(currentBatch);
     }
+    return FrameData;
+}
+
+const RenderData &RenderBatcher::SmartReBuildFrameData(
+    UIStateTables &dataTables, const std::vector<RenderOp> &displayList,
+    const std::vector<int> &dirtyElements, float viewportHeight) {
+    bool dataEmpty = FrameData.empty();
+
+    if (dirtyElements.empty() && !dataEmpty) {
+        return FrameData;
+    }
+
+    if (dataEmpty) {
+        return ReBuildFrameData(dataTables, displayList, dirtyElements,
+                                viewportHeight);
+    }
+
+    // If the scene has become broadly dirty, the full rebuild path is cheaper
+    // than a partial update. This keeps the optimization useful for sparse dirty
+    // sets without turning into two full scans in heavy stress cases.
+    if (dirtyElements.size() >= FrameData.indexByInstanceId.size()) {
+        return ReBuildFrameData(dataTables, displayList, dirtyElements,
+                                viewportHeight);
+    }
+
+    std::unordered_set<int> dirtyLookup(dirtyElements.begin(), dirtyElements.end());
+
+    for (const RenderOp &op : displayList) {
+        if (op.type != RenderOpType::DrawElement)
+            continue;
+
+        auto instanceIt = FrameData.indexByInstanceId.find(op.elementId);
+        if (instanceIt == FrameData.indexByInstanceId.end()) {
+            return ReBuildFrameData(dataTables, displayList, dirtyElements,
+                                    viewportHeight);
+        }
+
+        if (dirtyLookup.count(op.elementId) == 0)
+            continue;
+
+        const GeometryStoreState &geometry = dataTables.geometry[op.elementId];
+        const StyleStoreState &style = dataTables.style[op.elementId];
+
+        if (style.hidden) {
+            return ReBuildFrameData(dataTables, displayList, dirtyElements,
+                                    viewportHeight);
+        }
+
+        FrameData.instances[instanceIt->second] =
+            BuildElementInstance(geometry, style);
+    }
+
     return FrameData;
 }
 
@@ -815,7 +1086,7 @@ void Renderer::Init() {
     // MainEBO.Bind();
 
     // MainVAO.LinkAttrib(MainVBO, TransformLayout);
-    // MainVAO.LinkAttrib(MainVBO, PackedColor);
+    // MainVAO.LinkAttrib(MainVBO, colorInfo);
     // MainVAO.LinkAttrib(MainVBO, BorderStyle);
     // MainVAO.LinkAttrib(MainVBO, CornerStyle);
 
@@ -824,6 +1095,8 @@ void Renderer::Init() {
     // MainEBO.Unbind();
     resolutionUniform = glGetUniformLocation(DefaultShader.ID, "u_resolution");
     initialized = true;
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     if (debug)
         std::cout << "VAO ID: " << MainVAO.ID << " | VBO ID: " << MainVBO.ID << '\n';
 }
@@ -870,10 +1143,11 @@ void Renderer::DrawFrame(const std::vector<DrawCommand> &commandsData,
 
         uintptr_t baseOffset = cmd.instanceOffset * sizeof(ElementInstance);
         MainVAO.LinkAttrib(MainVBO, TransformLayout, baseOffset);
-        MainVAO.LinkAttrib(MainVBO, PackedColor, baseOffset);
-        MainVAO.LinkAttrib(MainVBO, BorderStyle, baseOffset);
-        MainVAO.LinkAttrib(MainVBO, CornerStyle, baseOffset);
-        MainVBO.Bind();
+        MainVAO.LinkAttrib(MainVBO, colorInfo, baseOffset);
+        MainVAO.LinkAttrib(MainVBO, BorderColor, baseOffset);
+        MainVAO.LinkAttrib(MainVBO, BorderAndCornerStyle, baseOffset);
+        MainVAO.LinkAttrib(MainVBO, ShadowStyle, baseOffset);
+        MainVAO.LinkAttrib(MainVBO, ShadowColor, baseOffset);
 
         if (cmd.useScissor) {
             glEnable(GL_SCISSOR_TEST);

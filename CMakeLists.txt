@@ -24,6 +24,7 @@ set(SOURCES
     src/VAO.cpp
     src/VBO.cpp
     src/UI/UIElements.cpp
+    # src/UI/UIColor.cpp
 )
 
 # 3. Create the executable target using the verified sources
