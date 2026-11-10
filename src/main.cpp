@@ -72,7 +72,7 @@ int main() {
     uiScene.EditElementColor(root, {0.2f, 0.2f, 0.6f, 1.0f}, true);
 
     uiScene.EditElementShape(rect5, {400.0f, 400.0f, 200.0f, 100.0f}, true);
-    uiScene.EditElementColor(rect5, {0.1f, 0.1f, 0.1f, 1.0f}, true);
+    uiScene.EditElementColor(rect5, {0.1f, 0.8f, 0.1f, 1.0f}, true);
     uiScene.EditElementBorder(rect5, 2.0f, 2.0f, 2.0f, 2.0f, true);
     uiScene.EditElementBorderColor(rect5, {1.0f, 1.0f, 1.0f, 1.0f}, true);
     uiScene.EditElementCornerRadius(rect5, 20.0f, 20.0f, 20.0f, 2.0f, true);
@@ -81,7 +81,7 @@ int main() {
 
     uiScene.EditElementShape(container, {100.0f, 20.0f, 30.0f, 30.0f}, true);
     uiScene.EditElementColor(container, {0.5f, 0.1f, 0.5f, 1.0f}, true);
-    uiScene.EditElementPadding(container, 10.0f, true);
+    uiScene.EditElementPadding(container, 0.0f, true);
     uiScene.EditElementCornerRadius(container, 5.0f, 5.0f, 5.0f, 5.0f, true);
     uiScene.EditElementBorder(container, 20.0f, 2.0f, 2.0f, 2.0f, true);
     uiScene.EditElementBorderColor(container, {1.0f, 1.0f, 1.0f, 1.0f}, true);

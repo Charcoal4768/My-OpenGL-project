@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <memory>
 #include <openglBasics/EBO.h>
 #include <openglBasics/VAO.h>
@@ -23,7 +24,7 @@ constexpr float F_UNSET = -1.0f;
 constexpr int I_UNSET = -1;
 typedef std::vector<std::unique_ptr<UIElement>> pointerVector;
 
-// Major refactor, switching from standard drawing + batching to:
+// Major refactor, switched from standard drawing + batching to:
 // instanced drawing + batching
 
 // Vertex Struct no longer neeced
@@ -36,11 +37,22 @@ typedef std::vector<std::unique_ptr<UIElement>> pointerVector;
 
 struct __attribute__((packed)) ElementInstance {
     GLfloat transform[4];
-    GLuint packedColor;         // rgba
-    GLuint borderColor;         // rgba
+    GLuint colorInfo;           // RGBA8
+    GLuint borderColor;         // RGBA8
     GLuint borderAndCornerInfo; // all edge border, all 4 corner roundness
-    GLuint shadowInfo;          // shadow blur, rgba3335, x & y offset
+    GLuint shadowInfo;          // shadow blur, x & y offset
+    GLuint shadowColor;         // RGBA8
 };
+
+static_assert(sizeof(ElementInstance) == 36);
+static_assert(offsetof(ElementInstance, transform) == 0);
+static_assert(offsetof(ElementInstance, colorInfo) == 16);
+static_assert(offsetof(ElementInstance, borderColor) == 20);
+static_assert(offsetof(ElementInstance, borderAndCornerInfo) == 24);
+static_assert(offsetof(ElementInstance, shadowInfo) == 28);
+static_assert(offsetof(ElementInstance, shadowColor) == 32);
+
+// struct __attribute__((packed)) TextInstance {};
 
 struct ScissorRect {
     GLint x, y;
@@ -59,6 +71,34 @@ struct Color {
     bool operator!=(const Color &other) const {
         return r != other.r || g != other.g || b != other.b || a != other.a;
     }
+};
+
+struct colorInfo {
+    uint32_t RGBA8 = 0xFFFFFFFFu;
+    uint8_t toUInt8(float val);
+    void setR(uint8_t r);
+    void setG(uint8_t g);
+    void setB(uint8_t b);
+    void setA(uint8_t a);
+    void setRf(float r);
+    void setGf(float g);
+    void setBf(float b);
+    void setAf(float a);
+    void setRGBA8F(float r, float g, float b, float a);
+    void setRGBA88(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+    void setRGBA832(uint32_t color);
+    void getR(uint8_t &out);
+    void getG(uint8_t &out);
+    void getB(uint8_t &out);
+    void getA(uint8_t &out);
+    void getRf(float &out);
+    void getGf(float &out);
+    void getBf(float &out);
+    void getAf(float &out);
+};
+
+struct borderInfo {
+    uint32_t border;
 };
 
 enum class ScreenLayoutMode {
@@ -114,9 +154,9 @@ struct StyleStoreState {
     float maxWidth = F_UNSET;
     float maxHeight = F_UNSET;
 
-    Color color = {1.0f, 1.0f, 1.0f, 1.0f};
-    Color borderColor = {0.0f, 0.0f, 0.0f, 1.0f};
-    Color shadowColor = {0.0f, 0.0f, 0.0f, 1.0f};
+    colorInfo color;
+    colorInfo borderColor;
+    colorInfo shadowColor;
 
     float prefferedWidthPercent = F_UNSET;
     float prefferedHeightPercent = F_UNSET;
@@ -140,8 +180,6 @@ struct UIStateTables {
     std::vector<GeometryStoreState> geometry;
     std::vector<StyleStoreState> style;
 };
-
-// UIElements.h
 
 std::array<float, 2> ApplyStyle(float computedWidth, float computedHeight,
                                 float parentWidth, float parentHeight,
@@ -168,14 +206,6 @@ class UIElement {
 
     float widthPercent = F_UNSET; // b/w 0.0f and 1.0f
     float heightPercent = F_UNSET;
-
-    // float padding = 5.0f;
-    // float borderWidth = 0.0f;
-    // float cornerRadiusTopLeft = 0.0f;
-    // float cornerRadiusTopRight = 0.0f;
-    // float cornerRadiusBottomLeft = 0.0f;
-    // float cornerRadiusBottomRight = 0.0f;
-    // float borderWidth = 0.0f;
 
     std::vector<int> childIds;
 
@@ -265,28 +295,28 @@ class Renderer {
                               GL_FLOAT,
                               GL_FALSE,
                               sizeof(ElementInstance),
-                              static_cast<uintptr_t>(0 * sizeof(float)),
+                              offsetof(ElementInstance, transform),
                               1,
                               GL_FALSE};
 
-    Layout PackedColor = {1,
-                          4,
-                          GL_UNSIGNED_BYTE,
-                          GL_TRUE,
-                          sizeof(ElementInstance),
-                          static_cast<uintptr_t>(4 * sizeof(float)),
-                          1,
-                          GL_FALSE};
+    Layout colorInfo = {1,
+                        1,
+                        GL_UNSIGNED_INT,
+                        GL_FALSE,
+                        sizeof(ElementInstance),
+                        offsetof(ElementInstance, colorInfo),
+                        1,
+                        GL_TRUE};
 
     Layout BorderColor = {
         2,
-        4,
-        GL_UNSIGNED_BYTE,
-        GL_TRUE,
-        sizeof(ElementInstance),
-        static_cast<uintptr_t>((4 * sizeof(float)) + (1 * sizeof(uint32_t))),
         1,
-        GL_FALSE};
+        GL_UNSIGNED_INT,
+        GL_FALSE,
+        sizeof(ElementInstance),
+        offsetof(ElementInstance, borderColor),
+        1,
+        GL_TRUE};
 
     Layout BorderAndCornerStyle = {
         3,
@@ -294,7 +324,7 @@ class Renderer {
         GL_UNSIGNED_INT,
         GL_FALSE,
         sizeof(ElementInstance),
-        static_cast<uintptr_t>((4 * sizeof(float)) + (2 * sizeof(uint32_t))),
+        offsetof(ElementInstance, borderAndCornerInfo),
         1,
         GL_TRUE};
 
@@ -304,7 +334,17 @@ class Renderer {
         GL_UNSIGNED_INT,
         GL_FALSE,
         sizeof(ElementInstance),
-        static_cast<uintptr_t>((4 * sizeof(float)) + (3 * sizeof(uint32_t))),
+        offsetof(ElementInstance, shadowInfo),
+        1,
+        GL_TRUE};
+
+    Layout ShadowColor = {
+        5,
+        1,
+        GL_UNSIGNED_INT,
+        GL_FALSE,
+        sizeof(ElementInstance),
+        offsetof(ElementInstance, shadowColor),
         1,
         GL_TRUE};
 
@@ -350,17 +390,17 @@ class UIScene {
     void MarkDirty(int id);
     void MarkParentChainDirty(int id);
     void EditElementShape(int id, const GeometryStoreState &props, bool dirtyChain);
-    void EditElementColor(int id, const Color &props, bool dirtyChain);
+    void EditElementColor(int id, Color props, bool dirtyChain);
     void EditElementBorder(int id, float borderTop, float borderRight,
                            float borderBottom, float borderLeft,
                            bool dirtyChain = true);
-    void EditElementBorderColor(int id, const Color &borderColor, bool dirtyChain);
+    void EditElementBorderColor(int id, Color borderColor, bool dirtyChain);
     void EditElementCornerRadius(int id, float topLeft, float topRight,
                                  float bottomLeft, float bottomRight,
                                  bool dirtyChain = true);
     void EditElementPadding(int id, float padding, bool dirtyChain);
     void EditElementShadow(int id, float blur, float offsetX, float offsetY,
-                           const Color &shadowColor, bool dirtyChain);
+                           Color shadowColor, bool dirtyChain);
     void EditElementVisibility(int id, bool hidden, bool dirtyChain);
     void StepFrame(std::array<float, 2> &resolution);
     void AddChild(int parentId, int childId);
@@ -413,10 +453,7 @@ class UIScene {
         elementShape.absoluteX = 0.0f;
         elementShape.absoluteY = 0.0f;
 
-        elementAppearance.color.r = 1.0f;
-        elementAppearance.color.g = 1.0f;
-        elementAppearance.color.b = 1.0f;
-        elementAppearance.color.a = 1.0f;
+        elementAppearance;
         elementAppearance.hidden = false;
         elementAppearance.maxHeight = F_UNSET;
         elementAppearance.maxWidth = F_UNSET;
@@ -430,10 +467,11 @@ class UIScene {
         elementAppearance.borderLeft = 0.0f;
         elementAppearance.borderRight = 0.0f;
         elementAppearance.borderTop = 0.0f;
-        elementAppearance.borderColor = {0.0f, 0.0f, 0.0f, 1.0f};
         elementAppearance.padding = 0.0f;
 
-        // lets stop setting these things, they're already set by default
+        elementAppearance.color.setRGBA8F(1.0f, 1.0f, 1.0f, 1.0f);
+        elementAppearance.borderColor.setRGBA8F(0.0f, 0.0f, 0.0f, 1.0f);
+        elementAppearance.shadowColor.setRGBA8F(0.0f, 0.0f, 0.0f, 1.0f);
 
         dataTables.geometry.push_back(elementShape);
         dataTables.style.push_back(elementAppearance);

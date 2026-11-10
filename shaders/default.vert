@@ -2,10 +2,11 @@
 
 // Instanced Attributes
 layout (location = 0) in vec4 a_Transform;
-layout (location = 1) in vec4 a_PackedColor;
-layout (location = 2) in vec4 a_PackedBorderColor;
+layout (location = 1) in uint a_PackedColor;
+layout (location = 2) in uint a_PackedBorderColor;
 layout (location = 3) in uint a_BorderAndCornerInfo;
 layout (location = 4) in uint a_ShadowInfo;
+layout (location = 5) in uint a_ShadowColor;
 
 uniform vec2 u_resolution;
 
@@ -18,6 +19,16 @@ flat out vec2 v_BoxSize;
 flat out float v_ShadowBlur;
 flat out vec2  v_ShadowOffset;
 flat out vec4  v_ShadowColor;
+
+vec4 unpackRGBA8(uint color)
+{
+    return vec4(
+        float((color >> 24u) & 0xFFu),
+        float((color >> 16u) & 0xFFu),
+        float((color >> 8u) & 0xFFu),
+        float(color & 0xFFu)
+    ) / 255.0;
+}
 
 const vec2 quadVertices[6] = vec2[](
     vec2(0.0, 0.0), // Triangle 1
@@ -42,13 +53,13 @@ void main()
         float((a_ShadowInfo >> 6u) & 0x3Fu) - 32.0,
         float((a_ShadowInfo >> 12u) & 0x3Fu) - 32.0
     );
-    float shadowAlpha = float((a_ShadowInfo >> 30u) & 0x3Fu) / 3.0;
+    v_ShadowColor = unpackRGBA8(a_ShadowColor);
 
     // Expand quad bounds based on blur radius and direction offset
     vec2 paddingMin = vec2(0.0);
     vec2 paddingMax = vec2(0.0);
 
-    if (shadowAlpha > 0.0 && (blur > 0.0 || length(shadowOffset) > 0.0)) {
+    if (v_ShadowColor.a > 0.0 && (blur > 0.0 || length(shadowOffset) > 0.0)) {
         paddingMin = max(vec2(0.0), vec2(blur) - shadowOffset);
         paddingMax = max(vec2(0.0), vec2(blur) + shadowOffset);
     }
@@ -65,8 +76,8 @@ void main()
     vec2 ndc = (actualPixelPos / u_resolution) * 2.0 - 1.0;
     gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
 
-    v_Color = a_PackedColor;
-    v_BorderColor = a_PackedBorderColor; 
+    v_Color = unpackRGBA8(a_PackedColor);
+    v_BorderColor = unpackRGBA8(a_PackedBorderColor);
     v_BoxSize = elementSize;
  
     // Unpack border & corner info
@@ -82,9 +93,4 @@ void main()
 
     v_ShadowBlur = blur;
     v_ShadowOffset = shadowOffset;
-
-    v_ShadowColor.r = float((a_ShadowInfo >> 18u) & 0xFu) / 15.0; 
-    v_ShadowColor.g = float((a_ShadowInfo >> 22u) & 0xFu) / 15.0; 
-    v_ShadowColor.b = float((a_ShadowInfo >> 26u) & 0xFu) / 15.0; 
-    v_ShadowColor.a = shadowAlpha;  
 }
