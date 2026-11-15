@@ -4,6 +4,9 @@ out vec4 FragColor;
 
 in vec4 v_Color; 
 in vec2 v_PosRelToCenter;
+in vec2 v_TexCoord;
+flat in uint v_ElementType;
+flat in float v_TextureLayer;
 flat in vec2 v_BoxSize;
 flat in vec4 v_BorderWidths;
 flat in vec4 v_BorderColor;
@@ -17,6 +20,7 @@ uniform vec2 u_resolution;
 uniform int u_clipCount;
 uniform vec4 u_clipRects[MAX_CLIP_DEPTH];
 uniform vec4 u_clipRadii[MAX_CLIP_DEPTH];
+uniform sampler2DArray u_glyphAtlas;
 
 const float EPSILON = 1e-5;
 
@@ -70,8 +74,36 @@ vec4 buildShadowLayer(vec2 pOuter, vec2 bOuter, vec4 cornerRadii, float shadowBl
     return vec4(shadowColor.rgb, shadowColor.a * alphaShadow);
 }
 
+float computeClipAlpha()
+{
+    float clipAlpha = 1.0;
+    vec2 fragmentPosition = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
+    for (int i = 0; i < MAX_CLIP_DEPTH; ++i)
+    {
+        if (i >= u_clipCount)
+            break;
+
+        vec4 rect = u_clipRects[i];
+        vec2 halfSize = rect.zw * 0.5;
+        vec2 relativePosition = fragmentPosition - rect.xy - halfSize;
+        float clipDistance = sdRoundBox(relativePosition, halfSize, u_clipRadii[i]);
+        float clipAA = max(fwidth(relativePosition.x), fwidth(relativePosition.y));
+        clipAlpha *= computeAlphaFromDistance(clipDistance, clipAA);
+    }
+    return clipAlpha;
+}
+
 void main()
 {
+    if (v_ElementType == 2u)
+    {
+        float coverage = texture(
+            u_glyphAtlas, vec3(v_TexCoord, v_TextureLayer)).r;
+        FragColor = vec4(v_Color.rgb,
+                         v_Color.a * coverage * computeClipAlpha());
+        return;
+    }
+
     vec2 b_outer = v_BoxSize * 0.5;
     vec2 p_outer = v_PosRelToCenter;
 
@@ -115,19 +147,6 @@ void main()
 
     vec4 finalColor = mix(shadowLayer, elementColor, elementColor.a);
 
-    vec2 fragmentPosition = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
-    for (int i = 0; i < MAX_CLIP_DEPTH; ++i)
-    {
-        if (i >= u_clipCount)
-            break;
-
-        vec4 rect = u_clipRects[i];
-        vec2 halfSize = rect.zw * 0.5;
-        vec2 relativePosition = fragmentPosition - rect.xy - halfSize;
-        float clipDistance = sdRoundBox(relativePosition, halfSize, u_clipRadii[i]);
-        float clipAA = max(fwidth(relativePosition.x), fwidth(relativePosition.y));
-        finalColor.a *= computeAlphaFromDistance(clipDistance, clipAA);
-    }
-
+    finalColor.a *= computeClipAlpha();
     FragColor = finalColor;
 }

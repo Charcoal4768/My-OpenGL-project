@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -25,178 +26,6 @@ void UIScene::SetRootViewport(float width, float height) {
             }
         }
     }
-}
-
-std::array<float, 2> ApplyStyle(float computedWidth, float computedHeight,
-                                float parentWidth, float parentHeight,
-                                const StyleStoreState &style) {
-    // we want final size to be basically css clamp() type stuff
-    // preferredWidth/Height are percentages: 0.0 -> 1.0
-    // also, either Percentages or absolute pixel sizing, both = bug in the app
-    // using this framework
-    float prefferedWidth;
-    float prefferedHeight;
-
-    prefferedWidth = (style.prefferedWidthPercent != F_UNSET)
-                         ? (style.prefferedWidthPercent * parentWidth)
-                         : computedWidth;
-    prefferedHeight = (style.prefferedHeightPercent != F_UNSET)
-                          ? (style.prefferedHeightPercent * parentHeight)
-                          : computedHeight;
-
-    // // print preferred size
-    // std::cout << "Preferred Size: " << prefferedWidth << " x "
-    //           << prefferedHeight << '\n';
-
-    if (style.maxWidth != F_UNSET)
-        prefferedWidth = std::min(prefferedWidth, style.maxWidth);
-    if (style.maxHeight != F_UNSET)
-        prefferedHeight = std::min(prefferedHeight, style.maxHeight);
-
-    float finalWidth = prefferedWidth;
-
-    if (style.minWidth != F_UNSET)
-        finalWidth = std::max(finalWidth, style.minWidth);
-
-    float finalHeight = prefferedHeight;
-
-    if (style.minHeight != F_UNSET)
-        finalHeight = std::max(finalHeight, style.minHeight);
-
-    return {finalWidth, finalHeight};
-}
-
-// void LayoutManager::Init(pointerVector &elementPointers) {
-//     // assert(elementPointers.back() != nullptr);
-//     if (initialized == true) {
-//         std::cout << "WARNING:: Layout Manager Initialized when references"
-//                      " already populated"
-//                   << std::endl;
-//         return;
-//     }
-//     context.currentElementReferences = &elementPointers;
-// }
-
-std::vector<int> LayoutManager::Run(const TraversalData &traversal,
-                                    pointerVector &elementPointers,
-                                    UIStateTables &dataTables) {
-    std::vector<int> dirtyElementIds;
-    std::unordered_set<int> dirtyElementCheck;
-    if (elementPointers.empty())
-        return dirtyElementIds;
-
-    context.currentElementReferences = &elementPointers;
-    context.parentIdLookup = &traversal.parentIdLookup;
-
-    struct LayoutSnapshot {
-        float localX;
-        float localY;
-        float width;
-        float height;
-        float absoluteX;
-        float absoluteY;
-    };
-    std::vector<LayoutSnapshot> previous(dataTables.geometry.size());
-    bool hasDirtyElement = false;
-    for (int elementId : traversal.drawOrder) {
-        if (elementId < 0 ||
-            static_cast<size_t>(elementId) >= elementPointers.size() ||
-            !elementPointers[elementId]) {
-            continue;
-        }
-
-        const GeometryStoreState &geometry = dataTables.geometry[elementId];
-        previous[elementId] = {geometry.localX, geometry.localY, geometry.width,
-                               geometry.height, geometry.absoluteX,
-                               geometry.absoluteY};
-        UIElement *element = elementPointers[elementId].get();
-        if (element->isDirty) {
-            hasDirtyElement = true;
-            dirtyElementCheck.insert(elementId);
-            dirtyElementIds.push_back(elementId);
-        }
-    }
-
-    if (!hasDirtyElement) {
-        context.currentElementReferences = nullptr;
-        context.parentIdLookup = nullptr;
-        return dirtyElementIds;
-    }
-
-    for (auto it = traversal.drawOrder.rbegin(); it != traversal.drawOrder.rend();
-         ++it) {
-        const int elementId = *it;
-        if (elementId < 0 ||
-            static_cast<size_t>(elementId) >= elementPointers.size() ||
-            !elementPointers[elementId]) {
-            continue;
-        }
-        elementPointers[elementId]->MeasureLayout(dataTables, context);
-    }
-
-    for (int elementId : traversal.drawOrder) {
-        if (elementId < 0 ||
-            static_cast<size_t>(elementId) >= elementPointers.size() ||
-            !elementPointers[elementId]) {
-            continue;
-        }
-
-        UIElement *element = elementPointers[elementId].get();
-        GeometryStoreState &geometry = dataTables.geometry[elementId];
-        const int parentId =
-            static_cast<size_t>(elementId) < traversal.parentIdLookup.size()
-                ? traversal.parentIdLookup[elementId]
-                : I_UNSET;
-
-        float parentWidth = 800.0f;
-        float parentHeight = 800.0f;
-        if (parentId >= 0 &&
-            static_cast<size_t>(parentId) < dataTables.geometry.size()) {
-            const GeometryStoreState &parent = dataTables.geometry[parentId];
-            parentWidth = parent.width;
-            parentHeight = parent.height;
-        }
-
-        const auto finalSize =
-            ApplyStyle(geometry.measuredWidth, geometry.measuredHeight,
-                       parentWidth, parentHeight, dataTables.style[elementId]);
-        geometry.width = finalSize[0];
-        geometry.height = finalSize[1];
-
-        if (parentId >= 0 &&
-            static_cast<size_t>(parentId) < dataTables.geometry.size()) {
-            const GeometryStoreState &parent = dataTables.geometry[parentId];
-            geometry.absoluteX = parent.absoluteX + geometry.localX;
-            geometry.absoluteY = parent.absoluteY + geometry.localY;
-        } else {
-            geometry.absoluteX = geometry.localX;
-            geometry.absoluteY = geometry.localY;
-        }
-
-        element->ArrangeLayout(dataTables, context);
-        element->isDirty = false;
-    }
-
-    for (int elementId : traversal.drawOrder) {
-        if (elementId < 0 ||
-            static_cast<size_t>(elementId) >= dataTables.geometry.size()) {
-            continue;
-        }
-        const GeometryStoreState &geometry = dataTables.geometry[elementId];
-        const LayoutSnapshot &old = previous[elementId];
-        if (geometry.localX != old.localX || geometry.localY != old.localY ||
-            geometry.width != old.width || geometry.height != old.height ||
-            geometry.absoluteX != old.absoluteX ||
-            geometry.absoluteY != old.absoluteY) {
-            if (dirtyElementCheck.insert(elementId).second) {
-                dirtyElementIds.push_back(elementId);
-            }
-        }
-    }
-
-    context.currentElementReferences = nullptr;
-    context.parentIdLookup = nullptr;
-    return dirtyElementIds;
 }
 
 void UIScene::MarkDirty(int id) {
@@ -227,50 +56,6 @@ void UIScene::MarkParentChainDirty(int elementId) {
         return;
 
     MarkParentChainDirty(parentId);
-}
-
-bool LayoutContext::IsChildOf(int childId, int parentId) const {
-    assert(currentElementReferences != nullptr);
-    assert(parentId >= 0 && parentId < parentIdLookup->size());
-    assert(childId >= 0 && childId < currentElementReferences->size());
-
-    if (childId == parentId)
-        return true;
-
-    int currentParent = (*parentIdLookup)[childId];
-    while (currentParent != I_UNSET) {
-        if (currentParent == parentId)
-            return true;
-        currentParent = (*parentIdLookup)[currentParent];
-    }
-    return false;
-}
-
-void LayoutContext::MarkDirty(int id, int callerId) {
-    assert(currentElementReferences != nullptr);
-    assert(id == callerId || IsChildOf(id, callerId));
-    if (id == I_UNSET || id >= currentElementReferences->size())
-        return;
-
-    UIElement *el = (*currentElementReferences)[id].get();
-    if (el)
-        el->isDirty = true;
-}
-
-void LayoutContext::MarkParentChainDirty(int targetId, int callerId) {
-    assert(currentElementReferences != nullptr);
-    assert(targetId == callerId || IsChildOf(targetId, callerId));
-
-    int currentId = targetId;
-    while (currentId != I_UNSET &&
-           currentId < (int)currentElementReferences->size()) {
-        UIElement *el = (*currentElementReferences)[currentId].get();
-        if (!el)
-            break;
-
-        el->isDirty = true;
-        currentId = el->parentId; // Climb up cleanly
-    }
 }
 
 ScissorRect IntersectRects(const ScissorRect &a, const ScissorRect &b) {
@@ -530,6 +315,65 @@ void UIScene::EditElementVisibility(int id, bool hidden, bool dirtyChain) {
     }
 }
 
+void UIScene::EditElementText(int id, std::string text, float fontSize,
+                              std::string fontFamily) {
+    if (id < 0 || static_cast<size_t>(id) >= ptrStore.size() ||
+        !ptrStore[id]) {
+        throw std::out_of_range("EditElementText received an invalid element ID.");
+    }
+
+    TextElement *element = dynamic_cast<TextElement *>(ptrStore[id].get());
+    if (!element)
+        throw std::invalid_argument("EditElementText requires a TextElement.");
+    if (!std::isfinite(fontSize) || fontSize < 1.0f || fontSize > 512.0f)
+        throw std::invalid_argument("Text font size must be between 1 and 512.");
+
+    if (element->text == text && element->fontSize == fontSize &&
+        element->fontFamily == fontFamily) {
+        return;
+    }
+
+    element->text = std::move(text);
+    element->fontSize = fontSize;
+    element->fontFamily = std::move(fontFamily);
+    element->textLayoutDirty = true;
+    element->isDirty = true;
+}
+
+int UIScene::AddRectangle(int parentId, const GeometryStoreState &shape,
+                          Color color, float cornerRadius, float borderWidth,
+                          Color borderColor) {
+    if (!std::isfinite(cornerRadius) || cornerRadius < 0.0f ||
+        !std::isfinite(borderWidth) || borderWidth < 0.0f) {
+        throw std::invalid_argument(
+            "Rectangle corner radius and border width must be non-negative.");
+    }
+
+    const int id = AddElementToParent<UIRect>(parentId, shape);
+    EditElementColor(id, color, false);
+    EditElementCornerRadius(id, cornerRadius, cornerRadius, cornerRadius,
+                            cornerRadius, false);
+    if (borderWidth > 0.0f) {
+        EditElementBorder(id, borderWidth, borderWidth, borderWidth,
+                          borderWidth, false);
+        EditElementBorderColor(id, borderColor, false);
+    }
+    return id;
+}
+
+int UIScene::AddText(int parentId, float x, float y, float fontSize,
+                     std::string text, Color color, std::string fontFamily) {
+    if (!std::isfinite(fontSize) || fontSize < 1.0f || fontSize > 512.0f) {
+        throw std::invalid_argument("Text font size must be between 1 and 512.");
+    }
+
+    const int id = AddElementToParent<TextElement>(
+        parentId, {x, y, F_UNSET, F_UNSET});
+    EditElementText(id, std::move(text), fontSize, std::move(fontFamily));
+    EditElementColor(id, color, false);
+    return id;
+}
+
 const GeometryStoreState &UIScene::GetElementShape(int id) const {
     assert(id >= 0);
     assert(id < dataTables.geometry.size());
@@ -652,9 +496,6 @@ void Hierarchy::RecursiveDownTraversal(int elementId) {
 void UIScene::Init() {
     // what do i do here?
     // set Renderer honestly for now, nothing else...
-    if (!MainRenderer.IsInitialized())
-        MainRenderer.Init();
-
     MainHierarchy.hirearchyDirty = true;
 }
 
@@ -713,24 +554,6 @@ void UIScene::RemoveChild(int childId) {
     MainHierarchy.hirearchyDirty = true;
 }
 
-void UIElement::MeasureLayout(UIStateTables &data, LayoutContext &) {
-    if (id == I_UNSET || static_cast<size_t>(id) >= data.geometry.size())
-        return;
-
-    GeometryStoreState &geometry = data.geometry[id];
-    geometry.measuredWidth = geometry.width;
-    geometry.measuredHeight = geometry.height;
-}
-
-void UIElement::ArrangeLayout(UIStateTables &, LayoutContext &) {}
-
-std::array<float, 2> ContainerElement::ResolveChildSize(
-    float computedWidth, float computedHeight, float parentWidth,
-    float parentHeight, const StyleStoreState &childStyle) const {
-    return ApplyStyle(computedWidth, computedHeight, parentWidth, parentHeight,
-                      childStyle);
-}
-
 ScreenLayoutMode UIScene::GetScreenLayoutMode() const {
     if (dataTables.geometry[rootId].width < 600.0f)
         return ScreenLayoutMode::Mobile;
@@ -745,28 +568,29 @@ ScreenLayoutMode UIScene::GetScreenLayoutMode() const {
 // parse the commands and render the frame data
 void UIScene::StepFrame(std::array<float, 2> &resolution) {
     SetRootViewport(resolution[0], resolution[1]);
+    if (!MainRenderer.IsInitialized())
+        MainRenderer.Init();
 
-    TraversalData frameTraversalData;
     const bool hierarchyChanged = MainHierarchy.hirearchyDirty;
+    const TraversalData *currentTraversalData = nullptr;
     if (hierarchyChanged) {
-        frameTraversalData = MainHierarchy.RebuildTraversal(ptrStore);
+        currentTraversalData = &MainHierarchy.RebuildTraversal(ptrStore);
         if (debug)
             std::cout << "Building Traversal" << '\n';
     } else {
-        frameTraversalData = MainHierarchy.ReturnCurrentTraversal();
+        currentTraversalData = &MainHierarchy.ReturnCurrentTraversal();
         if (debug)
             std::cout << "Skipping Traversal" << '\n';
     }
 
-    const TraversalData &currentTraversalData = frameTraversalData;
-    if (currentTraversalData.empty()) {
+    if (currentTraversalData->empty()) {
         if (debug)
             std::cout << "Scene Empty" << '\n';
         return;
     }
 
-    std::vector<int> dirtyElementIds =
-        MainLayout.Run(currentTraversalData, ptrStore, dataTables);
+    const std::vector<int> &dirtyElementIds =
+        MainLayout.RunInto(*currentTraversalData, ptrStore, dataTables);
 
     const RenderData &cachedFrameGraphicalData = MainBatcher.GetFrameData();
     bool dataEmpty = cachedFrameGraphicalData.empty();
@@ -777,12 +601,12 @@ void UIScene::StepFrame(std::array<float, 2> &resolution) {
     if (frameDataUpdated) {
         if (hierarchyChanged) {
             currentGraphicalData = &MainBatcher.ReBuildFrameData(
-                dataTables, currentTraversalData.displayList, dirtyElementIds,
-                resolution[1]);
+                dataTables, currentTraversalData->displayList, dirtyElementIds,
+                resolution[1], ptrStore);
         } else {
             currentGraphicalData = &MainBatcher.SmartReBuildFrameData(
-                dataTables, currentTraversalData.displayList, dirtyElementIds,
-                resolution[1]);
+                dataTables, currentTraversalData->displayList, dirtyElementIds,
+                resolution[1], ptrStore);
         }
         if (debug)
             std::cout << "Rebuilding Frame" << "| Layout dirty |"
@@ -873,6 +697,38 @@ static void AppendQuad(RenderData &frame, const GeometryStoreState &geometry,
     frame.instances.push_back(BuildElementInstance(geometry, style));
 }
 
+static uint32_t PackNormalizedUv(float first, float second) {
+    const auto channel = [](float value) {
+        return static_cast<uint32_t>(
+            std::lround(std::clamp(value, 0.0f, 1.0f) * 65535.0f));
+    };
+    return channel(first) | (channel(second) << 16);
+}
+
+static void AppendText(RenderData &frame, const GeometryStoreState &geometry,
+                       const StyleStoreState &style,
+                       const TextElement &textElement) {
+    for (const TextGlyph &glyph : textElement.glyphs) {
+        const GlyphAtlasEntry atlas = ResolveGlyphAtlasEntry(glyph);
+        if (atlas.width == 0.0f || atlas.height == 0.0f)
+            continue;
+
+        ElementInstance instance{};
+        instance.hardwareID = 2;
+        instance.transform[0] =
+            geometry.absoluteX + glyph.penX + glyph.xOffset + atlas.bitmapLeft;
+        instance.transform[1] =
+            geometry.absoluteY + glyph.baseline - glyph.yOffset - atlas.bitmapTop;
+        instance.transform[2] = atlas.width;
+        instance.transform[3] = atlas.height;
+        instance.payload[0] = atlas.layer;
+        instance.payload[1] = PackNormalizedUv(atlas.u0, atlas.v0);
+        instance.payload[2] = PackNormalizedUv(atlas.u1, atlas.v1);
+        instance.payload[3] = style.color;
+        frame.instances.push_back(instance);
+    }
+}
+
 static ScissorRect BuildScissorRect(const GeometryStoreState &geometry,
                                     float viewportHeight) {
     return {
@@ -891,19 +747,20 @@ static ClipGeometry BuildClipGeometry(const GeometryStoreState &geometry,
 
 const RenderData &RenderBatcher::ReBuildFrameData(
     UIStateTables &dataTables, const std::vector<RenderOp> &displayList,
-    const std::vector<int> &dirtyElements, float viewportHeight) {
+    const std::vector<int> &dirtyElements, float viewportHeight,
+    const pointerVector &elements) {
 
     FrameData.instances.clear();
     FrameData.clips.clear();
     FrameData.commands.clear();
-    FrameData.indexByInstanceId.clear();
-    FrameData.dirtyElements.clear();
+    firstInstanceByElement.assign(elements.size(),
+                              std::numeric_limits<size_t>::max());
+    indexedElementCount = 0;
+    scissorRects.clear();
+    activeClips.clear();
 
     DrawCommand currentBatch; // we make a new batch
     bool batchStarted = false;
-
-    std::vector<ScissorRect> scissorRects;
-    std::vector<ClipGeometry> activeClips;
 
     const auto beginBatch = [&]() {
         currentBatch = {};
@@ -965,9 +822,20 @@ const RenderData &RenderBatcher::ReBuildFrameData(
             if (!batchStarted)
                 beginBatch();
 
-            FrameData.indexByInstanceId[op.elementId] = FrameData.instances.size();
-            AppendQuad(FrameData, geometry, style);
-            currentBatch.instanceCount += 1;
+            const size_t firstInstance = FrameData.instances.size();
+            if (auto *text =
+                    dynamic_cast<TextElement *>(elements[op.elementId].get())) {
+                AppendText(FrameData, geometry, style, *text);
+            } else {
+                AppendQuad(FrameData, geometry, style);
+            }
+            const size_t instanceCount = FrameData.instances.size() - firstInstance;
+            if (instanceCount > 0) {
+                firstInstanceByElement[static_cast<size_t>(op.elementId)] =
+                    firstInstance;
+                ++indexedElementCount;
+                currentBatch.instanceCount += static_cast<GLsizei>(instanceCount);
+            }
             break;
         }
 
@@ -982,7 +850,8 @@ const RenderData &RenderBatcher::ReBuildFrameData(
 
 const RenderData &RenderBatcher::SmartReBuildFrameData(
     UIStateTables &dataTables, const std::vector<RenderOp> &displayList,
-    const std::vector<int> &dirtyElements, float viewportHeight) {
+    const std::vector<int> &dirtyElements, float viewportHeight,
+    const pointerVector &elements) {
     bool dataEmpty = FrameData.empty();
 
     if (dirtyElements.empty() && !dataEmpty) {
@@ -991,35 +860,58 @@ const RenderData &RenderBatcher::SmartReBuildFrameData(
 
     if (dataEmpty) {
         return ReBuildFrameData(dataTables, displayList, dirtyElements,
-                                viewportHeight);
+                                viewportHeight, elements);
     }
 
     // If the scene has become broadly dirty, the full rebuild path is cheaper
     // than a partial update. This keeps the optimization useful for sparse dirty
     // sets without turning into two full scans in heavy stress cases.
-    if (dirtyElements.size() >= FrameData.indexByInstanceId.size()) {
+    if (dirtyElements.size() >= indexedElementCount) {
         return ReBuildFrameData(dataTables, displayList, dirtyElements,
-                                viewportHeight);
+                                viewportHeight, elements);
     }
 
-    std::unordered_set<int> dirtyLookup(dirtyElements.begin(), dirtyElements.end());
+    dirtyMarks.resize(elements.size(), 0);
+    if (++dirtyGeneration == 0) {
+        std::fill(dirtyMarks.begin(), dirtyMarks.end(), 0);
+        dirtyGeneration = 1;
+    }
+    for (int elementId : dirtyElements) {
+        if (elementId >= 0 &&
+            static_cast<size_t>(elementId) < dirtyMarks.size()) {
+            dirtyMarks[static_cast<size_t>(elementId)] = dirtyGeneration;
+        }
+    }
+    const auto isDirty = [this](int elementId) {
+        return elementId >= 0 &&
+               static_cast<size_t>(elementId) < dirtyMarks.size() &&
+               dirtyMarks[static_cast<size_t>(elementId)] == dirtyGeneration;
+    };
 
     for (const RenderOp &op : displayList) {
-        if (op.type == RenderOpType::PushClip &&
-            dirtyLookup.count(op.elementId) != 0) {
+        if (op.type == RenderOpType::PushClip && isDirty(op.elementId)) {
             return ReBuildFrameData(dataTables, displayList, dirtyElements,
-                                    viewportHeight);
+                                    viewportHeight, elements);
         }
         if (op.type != RenderOpType::DrawElement)
             continue;
 
-        auto instanceIt = FrameData.indexByInstanceId.find(op.elementId);
-        if (instanceIt == FrameData.indexByInstanceId.end()) {
+        if (isDirty(op.elementId) &&
+            dynamic_cast<const TextElement *>(
+                elements[op.elementId].get()) != nullptr) {
             return ReBuildFrameData(dataTables, displayList, dirtyElements,
-                                    viewportHeight);
+                                    viewportHeight, elements);
         }
 
-        if (dirtyLookup.count(op.elementId) == 0)
+        if (op.elementId < 0 ||
+            static_cast<size_t>(op.elementId) >= firstInstanceByElement.size() ||
+            firstInstanceByElement[static_cast<size_t>(op.elementId)] ==
+                std::numeric_limits<size_t>::max()) {
+            return ReBuildFrameData(dataTables, displayList, dirtyElements,
+                                    viewportHeight, elements);
+        }
+
+        if (!isDirty(op.elementId))
             continue;
 
         const GeometryStoreState &geometry = dataTables.geometry[op.elementId];
@@ -1027,10 +919,10 @@ const RenderData &RenderBatcher::SmartReBuildFrameData(
 
         if (style.hidden) {
             return ReBuildFrameData(dataTables, displayList, dirtyElements,
-                                    viewportHeight);
+                                    viewportHeight, elements);
         }
 
-        FrameData.instances[instanceIt->second] =
+        FrameData.instances[firstInstanceByElement[static_cast<size_t>(op.elementId)]] =
             BuildElementInstance(geometry, style);
     }
 
@@ -1050,6 +942,10 @@ void Renderer::Init() {
     clipCountUniform = glGetUniformLocation(DefaultShader.ID, "u_clipCount");
     clipRectsUniform = glGetUniformLocation(DefaultShader.ID, "u_clipRects");
     clipRadiiUniform = glGetUniformLocation(DefaultShader.ID, "u_clipRadii");
+    glyphAtlasUniform = glGetUniformLocation(DefaultShader.ID, "u_glyphAtlas");
+    InitializeGlyphAtlas();
+    DefaultShader.Activate();
+    glUniform1i(glyphAtlasUniform, 0);
     initialized = true;
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1073,6 +969,8 @@ void Renderer::DrawFrame(const RenderData &frameData,
     }
 
     DefaultShader.Activate();
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, GetGlyphAtlasTexture());
 
     if (resolutionUniform != -1) {
         glUniform2f(resolutionUniform, static_cast<float>(resolution[0]),
@@ -1183,66 +1081,4 @@ void Renderer::UploadFrame(const RenderData &frameData) {
     MainVAO.Unbind();
     MainVBO.Unbind();
     // MainEBO.Unbind();
-}
-
-void VerticalContainer::MeasureLayout(UIStateTables &data, LayoutContext &context) {
-    UIElement::MeasureLayout(data, context);
-    if (childIds.empty())
-        return;
-
-    GeometryStoreState &geometry = data.geometry[id];
-    const float padding = data.style[id].padding;
-    float childLargestWidth = 0.0f;
-    float contentHeight = (childIds.size() + 1) * padding;
-
-    for (int childId : childIds) {
-        const GeometryStoreState &child = data.geometry[childId];
-        childLargestWidth = std::max(childLargestWidth, child.measuredWidth);
-        contentHeight += child.measuredHeight;
-    }
-
-    if (fitContentWidth) {
-        geometry.measuredWidth =
-            std::max(geometry.width, childLargestWidth + 2.0f * padding);
-    }
-    if (fitContentHeight)
-        geometry.measuredHeight = contentHeight;
-}
-
-void VerticalContainer::ArrangeLayout(UIStateTables &data, LayoutContext &) {
-    if (childIds.empty())
-        return;
-
-    GeometryStoreState &container = data.geometry[id];
-    const float padding = data.style[id].padding;
-    float targetY = padding;
-
-    for (int childId : childIds) {
-        GeometryStoreState &child = data.geometry[childId];
-        const StyleStoreState &childStyle = data.style[childId];
-        float targetWidth = child.measuredWidth;
-        float targetHeight = child.measuredHeight;
-
-        if (resizeChildren) {
-            const float bigger = std::max(targetWidth, targetHeight);
-            const auto size = ResolveChildSize(
-                bigger, bigger, container.width, container.height, childStyle);
-            child.measuredWidth = targetWidth = size[0];
-            child.measuredHeight = targetHeight = size[1];
-        } else {
-            const auto size = ResolveChildSize(
-                targetWidth, targetHeight, container.width, container.height,
-                childStyle);
-            targetWidth = size[0];
-            targetHeight = size[1];
-        }
-
-        child.width = targetWidth;
-        child.height = targetHeight;
-        child.localX = centerHorizontally
-                           ? (container.width - targetWidth) * 0.5f
-                           : padding;
-        child.localY = targetY;
-        targetY += padding + targetHeight;
-    }
 }

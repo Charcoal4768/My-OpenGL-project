@@ -10,8 +10,8 @@
 #include <openglBasics/VAO.h>
 #include <openglBasics/VBO.h>
 #include <openglBasics/shaderclass.h>
-#include <unordered_map>
-#include <unordered_set>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 class UIElement;
@@ -101,10 +101,34 @@ struct RenderData {
     std::vector<ClipGeometry> clips;
     std::vector<DrawCommand> commands;
 
-    std::unordered_map<int, size_t> indexByInstanceId;
-    std::unordered_set<int> dirtyElements;
     bool empty() const { return (instances.empty() || commands.empty()); }
 };
+
+struct TextGlyph {
+    uint32_t glyphIndex = 0;
+    uint32_t faceIndex = 0;
+    float fontSize = 0.0f;
+    float penX = 0.0f;
+    float baseline = 0.0f;
+    float xOffset = 0.0f;
+    float yOffset = 0.0f;
+};
+
+struct GlyphAtlasEntry {
+    float bitmapLeft = 0.0f;
+    float bitmapTop = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    float u0 = 0.0f;
+    float v0 = 0.0f;
+    float u1 = 0.0f;
+    float v1 = 0.0f;
+    uint32_t layer = 0;
+};
+
+void InitializeGlyphAtlas();
+GLuint GetGlyphAtlasTexture();
+GlyphAtlasEntry ResolveGlyphAtlasEntry(const TextGlyph &glyph);
 
 struct TraversalData {
     std::vector<int> drawOrder;
@@ -242,14 +266,33 @@ class LayoutManager {
     // communicate if something was found dirty
     // update layout of "dirty" element
   private:
+    friend class UIScene;
+
+    struct LayoutSnapshot {
+        float localX;
+        float localY;
+        float width;
+        float height;
+        float absoluteX;
+        float absoluteY;
+    };
+
     int rootId = I_UNSET;
     bool debug = false;
+    std::vector<LayoutSnapshot> previous;
+    std::vector<int> dirtyElementIds;
+    std::vector<uint32_t> dirtyMarks;
+    uint32_t dirtyGeneration = 0;
+    const std::vector<int> &RunInto(const TraversalData &traversal,
+                                    pointerVector &elementPointers,
+                                    UIStateTables &dataTables);
     // bool initialized = false;
 
   public:
     LayoutContext context;
     std::vector<int> Run(const TraversalData &traversal,
-                         pointerVector &elementPointers, UIStateTables &dataTables);
+                         pointerVector &elementPointers,
+                         UIStateTables &dataTables);
     void SetRoot(int id);
     void SetDebug(bool enabled);
 };
@@ -257,17 +300,25 @@ class LayoutManager {
 class RenderBatcher {
   private:
     RenderData FrameData;
+    std::vector<size_t> firstInstanceByElement;
+    size_t indexedElementCount = 0;
+    std::vector<uint32_t> dirtyMarks;
+    uint32_t dirtyGeneration = 0;
+    std::vector<ScissorRect> scissorRects;
+    std::vector<ClipGeometry> activeClips;
     bool debug = false;
 
   public:
     const RenderData &ReBuildFrameData(UIStateTables &dataTables,
                                        const std::vector<RenderOp> &displayList,
                                        const std::vector<int> &dirtyElements,
-                                       float viewportHeight);
+                                       float viewportHeight,
+                                       const pointerVector &elements);
     const RenderData &SmartReBuildFrameData(UIStateTables &dataTables,
                                             const std::vector<RenderOp> &displayList,
                                             const std::vector<int> &dirtyElements,
-                                            float viewportHeight);
+                                            float viewportHeight,
+                                            const pointerVector &elements);
     const RenderData &GetFrameData() const;
     // prepare Verticies, indicies, cmd list
     void SetDebug(bool enabled);
@@ -284,6 +335,7 @@ class Renderer {
     GLint clipCountUniform = I_UNSET;
     GLint clipRectsUniform = I_UNSET;
     GLint clipRadiiUniform = I_UNSET;
+    GLint glyphAtlasUniform = I_UNSET;
 
     Layout HardwareIDLayout = {0, 1, GL_UNSIGNED_INT, GL_FALSE,
                                sizeof(ElementInstance),
@@ -351,7 +403,14 @@ class UIScene {
     void EditElementShadow(int id, float blur, float offsetX, float offsetY,
                            Color shadowColor, bool dirtyChain);
     void EditElementVisibility(int id, bool hidden, bool dirtyChain);
+    void EditElementText(int id, std::string text, float fontSize,
+                         std::string fontFamily = {});
     void StepFrame(std::array<float, 2> &resolution);
+    int AddRectangle(int parentId, const GeometryStoreState &shape, Color color,
+                     float cornerRadius = 0.0f, float borderWidth = 0.0f,
+                     Color borderColor = {0.0f, 0.0f, 0.0f, 1.0f});
+    int AddText(int parentId, float x, float y, float fontSize,
+                std::string text, Color color, std::string fontFamily = {});
     void AddChild(int parentId, int childId);
     void RemoveChild(int childId);
     void SetRootViewport(float width, float height);
@@ -429,6 +488,22 @@ class UIScene {
         assert(ptr != nullptr);
         return *ptr;
     }
+
+  private:
+    template <typename T>
+    int AddElementToParent(int parentId, const GeometryStoreState &shape) {
+        if (parentId != I_UNSET &&
+            (parentId < 0 || static_cast<size_t>(parentId) >= ptrStore.size() ||
+             !ptrStore[parentId])) {
+            throw std::out_of_range("Cannot add an element to an invalid parent.");
+        }
+
+        const int id = AddElement<T>();
+        if (parentId != I_UNSET)
+            AddChild(parentId, id);
+        EditElementShape(id, shape, false);
+        return id;
+    }
 };
 
 class UIRect : public ContainerElement {
@@ -442,6 +517,19 @@ class VerticalContainer : public ContainerElement {
     float r = 0.6f, g = 0.1f, b = 0.8f;
     void MeasureLayout(UIStateTables &data, LayoutContext &context) override;
     void ArrangeLayout(UIStateTables &data, LayoutContext &context) override;
+};
+
+class TextElement : public UIElement {
+  public:
+    std::string text;
+    std::string fontFamily;
+    float fontSize = 24.0f;
+    float measuredTextWidth = 0.0f;
+    float measuredTextHeight = 0.0f;
+    std::vector<TextGlyph> glyphs;
+    bool textLayoutDirty = true;
+
+    void MeasureLayout(UIStateTables &data, LayoutContext &context) override;
 };
 
 #endif
