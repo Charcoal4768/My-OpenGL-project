@@ -18,6 +18,8 @@ include_directories(include)
 # 2. Explicitly track your source files (keeps compilation snappy and reliable)
 set(SOURCES
     src/main.cpp
+    src/debug.cpp
+    src/minimal.cpp
     src/EBO.cpp
     src/glad.c
     src/shaderclass.cpp

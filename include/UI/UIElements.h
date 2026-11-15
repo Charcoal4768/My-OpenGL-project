@@ -4,6 +4,7 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <openglBasics/EBO.h>
 #include <openglBasics/VAO.h>
@@ -22,6 +23,7 @@ class Renderer;
 
 constexpr float F_UNSET = -1.0f;
 constexpr int I_UNSET = -1;
+constexpr GLsizei MAX_CLIP_DEPTH = 16;
 typedef std::vector<std::unique_ptr<UIElement>> pointerVector;
 
 // Major refactor, switched from standard drawing + batching to:
@@ -35,24 +37,23 @@ typedef std::vector<std::unique_ptr<UIElement>> pointerVector;
 //     GLfloat styleParams[2]; // corner radius, border width
 // };
 
-struct __attribute__((packed)) ElementInstance {
-    GLfloat transform[4];
-    GLuint colorInfo;           // RGBA8
-    GLuint borderColor;         // RGBA8
-    GLuint borderAndCornerInfo; // all edge border, all 4 corner roundness
-    GLuint shadowInfo;          // shadow blur, x & y offset
-    GLuint shadowColor;         // RGBA8
+struct ElementInstance {
+    uint32_t hardwareID = 0;
+    GLfloat transform[4]{};
+    GLuint payload[7]{};
 };
 
-static_assert(sizeof(ElementInstance) == 36);
-static_assert(offsetof(ElementInstance, transform) == 0);
-static_assert(offsetof(ElementInstance, colorInfo) == 16);
-static_assert(offsetof(ElementInstance, borderColor) == 20);
-static_assert(offsetof(ElementInstance, borderAndCornerInfo) == 24);
-static_assert(offsetof(ElementInstance, shadowInfo) == 28);
-static_assert(offsetof(ElementInstance, shadowColor) == 32);
+static_assert(sizeof(ElementInstance) == 48);
+static_assert(offsetof(ElementInstance, hardwareID) == 0);
+static_assert(offsetof(ElementInstance, transform) == 4);
+static_assert(offsetof(ElementInstance, payload) == 20);
 
-// struct __attribute__((packed)) TextInstance {};
+struct ClipGeometry {
+    GLfloat rect[4]{};
+    GLfloat cornerRadii[4]{};
+};
+
+static_assert(sizeof(ClipGeometry) == 32);
 
 struct ScissorRect {
     GLint x, y;
@@ -60,8 +61,10 @@ struct ScissorRect {
 };
 
 struct DrawCommand {
-    size_t instanceOffset = I_UNSET;
-    GLsizei instanceCount = I_UNSET;
+    size_t instanceOffset = 0;
+    GLsizei instanceCount = 0;
+    size_t clipOffset = 0;
+    GLsizei clipCount = 0;
     bool useScissor = false;
     ScissorRect scissorBox;
 };
@@ -73,29 +76,7 @@ struct Color {
     }
 };
 
-struct colorInfo {
-    uint32_t RGBA8 = 0xFFFFFFFFu;
-    uint8_t toUInt8(float val);
-    void setR(uint8_t r);
-    void setG(uint8_t g);
-    void setB(uint8_t b);
-    void setA(uint8_t a);
-    void setRf(float r);
-    void setGf(float g);
-    void setBf(float b);
-    void setAf(float a);
-    void setRGBA8F(float r, float g, float b, float a);
-    void setRGBA88(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-    void setRGBA832(uint32_t color);
-    void getR(uint8_t &out);
-    void getG(uint8_t &out);
-    void getB(uint8_t &out);
-    void getA(uint8_t &out);
-    void getRf(float &out);
-    void getGf(float &out);
-    void getBf(float &out);
-    void getAf(float &out);
-};
+using PackedColor = uint32_t;
 
 struct borderInfo {
     uint32_t border;
@@ -107,7 +88,7 @@ enum class ScreenLayoutMode {
     Desktop // Width > 1024px
 };
 
-enum class RenderOpType { DrawElement, PushScissor, PopScissor };
+enum class RenderOpType { DrawElement, PushClip, PopClip };
 
 struct RenderOp {
     RenderOpType type;
@@ -117,6 +98,7 @@ struct RenderOp {
 struct RenderData {
     const int defaultReserve = 100;
     std::vector<ElementInstance> instances;
+    std::vector<ClipGeometry> clips;
     std::vector<DrawCommand> commands;
 
     std::unordered_map<int, size_t> indexByInstanceId;
@@ -129,7 +111,7 @@ struct TraversalData {
     std::vector<RenderOp> displayList;
     std::vector<int> parentIdLookup;
     bool empty() const {
-        return (drawOrder.empty() || displayList.empty() || parentIdLookup.empty());
+        return drawOrder.empty() || displayList.empty();
     }
 };
 
@@ -138,6 +120,8 @@ struct GeometryStoreState {
     float localY = F_UNSET;
     float width = F_UNSET;
     float height = F_UNSET;
+    float measuredWidth = F_UNSET;
+    float measuredHeight = F_UNSET;
 
     float absoluteX = F_UNSET;
     float absoluteY = F_UNSET;
@@ -154,9 +138,9 @@ struct StyleStoreState {
     float maxWidth = F_UNSET;
     float maxHeight = F_UNSET;
 
-    colorInfo color;
-    colorInfo borderColor;
-    colorInfo shadowColor;
+    PackedColor color = 0xFFFFFFFFu;
+    PackedColor borderColor = 0x000000FFu;
+    PackedColor shadowColor = 0x000000FFu;
 
     float prefferedWidthPercent = F_UNSET;
     float prefferedHeightPercent = F_UNSET;
@@ -211,7 +195,15 @@ class UIElement {
 
     virtual ~UIElement() = default;
 
-    virtual bool UpdateLayout(UIStateTables &data, LayoutContext &context);
+    virtual void MeasureLayout(UIStateTables &data, LayoutContext &context);
+    virtual void ArrangeLayout(UIStateTables &data, LayoutContext &context);
+};
+
+class ContainerElement : public UIElement {
+  protected:
+    std::array<float, 2> ResolveChildSize(
+        float computedWidth, float computedHeight, float parentWidth,
+        float parentHeight, const StyleStoreState &childStyle) const;
 };
 
 class LayoutContext {
@@ -289,64 +281,22 @@ class Renderer {
     // EBO MainEBO; no longer required
     Shader DefaultShader;
     GLint resolutionUniform = I_UNSET;
+    GLint clipCountUniform = I_UNSET;
+    GLint clipRectsUniform = I_UNSET;
+    GLint clipRadiiUniform = I_UNSET;
 
-    Layout TransformLayout = {0,
-                              4,
-                              GL_FLOAT,
-                              GL_FALSE,
-                              sizeof(ElementInstance),
-                              offsetof(ElementInstance, transform),
-                              1,
-                              GL_FALSE};
-
-    Layout colorInfo = {1,
-                        1,
-                        GL_UNSIGNED_INT,
-                        GL_FALSE,
-                        sizeof(ElementInstance),
-                        offsetof(ElementInstance, colorInfo),
-                        1,
-                        GL_TRUE};
-
-    Layout BorderColor = {
-        2,
-        1,
-        GL_UNSIGNED_INT,
-        GL_FALSE,
-        sizeof(ElementInstance),
-        offsetof(ElementInstance, borderColor),
-        1,
-        GL_TRUE};
-
-    Layout BorderAndCornerStyle = {
-        3,
-        1,
-        GL_UNSIGNED_INT,
-        GL_FALSE,
-        sizeof(ElementInstance),
-        offsetof(ElementInstance, borderAndCornerInfo),
-        1,
-        GL_TRUE};
-
-    Layout ShadowStyle = {
-        4,
-        1,
-        GL_UNSIGNED_INT,
-        GL_FALSE,
-        sizeof(ElementInstance),
-        offsetof(ElementInstance, shadowInfo),
-        1,
-        GL_TRUE};
-
-    Layout ShadowColor = {
-        5,
-        1,
-        GL_UNSIGNED_INT,
-        GL_FALSE,
-        sizeof(ElementInstance),
-        offsetof(ElementInstance, shadowColor),
-        1,
-        GL_TRUE};
+    Layout HardwareIDLayout = {0, 1, GL_UNSIGNED_INT, GL_FALSE,
+                               sizeof(ElementInstance),
+                               offsetof(ElementInstance, hardwareID), 1, GL_TRUE};
+    Layout TransformLayout = {1, 4, GL_FLOAT, GL_FALSE, sizeof(ElementInstance),
+                              offsetof(ElementInstance, transform), 1, GL_FALSE};
+    Layout Payload0Layout = {2, 4, GL_UNSIGNED_INT, GL_FALSE,
+                             sizeof(ElementInstance),
+                             offsetof(ElementInstance, payload), 1, GL_TRUE};
+    Layout Payload1Layout = {3, 3, GL_UNSIGNED_INT, GL_FALSE,
+                             sizeof(ElementInstance),
+                             offsetof(ElementInstance, payload) + 4 * sizeof(GLuint),
+                             1, GL_TRUE};
 
     bool initialized = false;
     bool debug = false;
@@ -354,7 +304,7 @@ class Renderer {
   public:
     void Init();
     void UploadFrame(const RenderData &frameData);
-    void DrawFrame(const std::vector<DrawCommand> &commandsData,
+    void DrawFrame(const RenderData &frameData,
                    const std::array<float, 2> &resolution);
     bool IsInitialized() { return initialized; }
     void SetDebug(bool enabled);
@@ -369,7 +319,6 @@ class UIScene {
     pointerVector ptrStore;
     UIStateTables dataTables;
 
-    bool frameDataRebuild = true;
     int rootId = I_UNSET;
 
     Hierarchy MainHierarchy;
@@ -469,10 +418,6 @@ class UIScene {
         elementAppearance.borderTop = 0.0f;
         elementAppearance.padding = 0.0f;
 
-        elementAppearance.color.setRGBA8F(1.0f, 1.0f, 1.0f, 1.0f);
-        elementAppearance.borderColor.setRGBA8F(0.0f, 0.0f, 0.0f, 1.0f);
-        elementAppearance.shadowColor.setRGBA8F(0.0f, 0.0f, 0.0f, 1.0f);
-
         dataTables.geometry.push_back(elementShape);
         dataTables.style.push_back(elementAppearance);
         return newID;
@@ -486,16 +431,17 @@ class UIScene {
     }
 };
 
-class UIRect : public UIElement {
+class UIRect : public ContainerElement {
   public:
 };
 
-class VerticalContainer : public UIElement {
+class VerticalContainer : public ContainerElement {
   public:
     bool centerHorizontally = true;
     bool resizeChildren = false;
     float r = 0.6f, g = 0.1f, b = 0.8f;
-    bool UpdateLayout(UIStateTables &data, LayoutContext &context) override;
+    void MeasureLayout(UIStateTables &data, LayoutContext &context) override;
+    void ArrangeLayout(UIStateTables &data, LayoutContext &context) override;
 };
 
 #endif

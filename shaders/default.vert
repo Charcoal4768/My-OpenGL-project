@@ -1,12 +1,9 @@
 #version 330 core
 
-// Instanced Attributes
-layout (location = 0) in vec4 a_Transform;
-layout (location = 1) in uint a_PackedColor;
-layout (location = 2) in uint a_PackedBorderColor;
-layout (location = 3) in uint a_BorderAndCornerInfo;
-layout (location = 4) in uint a_ShadowInfo;
-layout (location = 5) in uint a_ShadowColor;
+layout (location = 0) in uint a_HardwareID;
+layout (location = 1) in vec4 a_Transform;
+layout (location = 2) in uvec4 a_Payload0;
+layout (location = 3) in uvec3 a_Payload1;
 
 uniform vec2 u_resolution;
 
@@ -43,17 +40,18 @@ const vec2 quadVertices[6] = vec2[](
 void main()
 {
     vec2 localCoord = quadVertices[gl_VertexID];
+    bool isShape = (a_HardwareID & 0xFu) == 0u;
 
     vec2 elementPos = a_Transform.xy;
     vec2 elementSize = a_Transform.zw;
     
     // Unpack shadow parameters to calculate quad padding
-    float blur = float(a_ShadowInfo & 0x3Fu);
+    float blur = isShape ? float(a_Payload0.w & 0x3Fu) : 0.0;
     vec2 shadowOffset = vec2(
-        float((a_ShadowInfo >> 6u) & 0x3Fu) - 32.0,
-        float((a_ShadowInfo >> 12u) & 0x3Fu) - 32.0
+        float((a_Payload0.w >> 6u) & 0x3Fu) - 32.0,
+        float((a_Payload0.w >> 12u) & 0x3Fu) - 32.0
     );
-    v_ShadowColor = unpackRGBA8(a_ShadowColor);
+    v_ShadowColor = isShape ? unpackRGBA8(a_Payload1.x) : vec4(0.0);
 
     // Expand quad bounds based on blur radius and direction offset
     vec2 paddingMin = vec2(0.0);
@@ -76,20 +74,20 @@ void main()
     vec2 ndc = (actualPixelPos / u_resolution) * 2.0 - 1.0;
     gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
 
-    v_Color = unpackRGBA8(a_PackedColor);
-    v_BorderColor = unpackRGBA8(a_PackedBorderColor);
+    v_Color = isShape ? unpackRGBA8(a_Payload0.x) : vec4(0.0);
+    v_BorderColor = isShape ? unpackRGBA8(a_Payload0.y) : vec4(0.0);
     v_BoxSize = elementSize;
  
     // Unpack border & corner info
-    v_BorderWidths.x = float(a_BorderAndCornerInfo & 0xFu);
-    v_BorderWidths.y = float((a_BorderAndCornerInfo >> 4u) & 0xFu);
-    v_BorderWidths.z = float((a_BorderAndCornerInfo >> 8u) & 0xFu);
-    v_BorderWidths.w = float((a_BorderAndCornerInfo >> 12u) & 0xFu);
+    v_BorderWidths.x = float(a_Payload0.z & 0xFu);
+    v_BorderWidths.y = float((a_Payload0.z >> 4u) & 0xFu);
+    v_BorderWidths.z = float((a_Payload0.z >> 8u) & 0xFu);
+    v_BorderWidths.w = float((a_Payload0.z >> 12u) & 0xFu);
 
-    v_CornerRadii.x = float((a_BorderAndCornerInfo >> 16u) & 0xFu);
-    v_CornerRadii.y = float((a_BorderAndCornerInfo >> 20u) & 0xFu);
-    v_CornerRadii.z = float((a_BorderAndCornerInfo >> 24u) & 0xFu);
-    v_CornerRadii.w = float((a_BorderAndCornerInfo >> 28u) & 0xFu);
+    v_CornerRadii.x = float((a_Payload0.z >> 16u) & 0xFu);
+    v_CornerRadii.y = float((a_Payload0.z >> 20u) & 0xFu);
+    v_CornerRadii.z = float((a_Payload0.z >> 24u) & 0xFu);
+    v_CornerRadii.w = float((a_Payload0.z >> 28u) & 0xFu);
 
     v_ShadowBlur = blur;
     v_ShadowOffset = shadowOffset;

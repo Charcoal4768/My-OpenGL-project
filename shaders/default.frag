@@ -12,6 +12,12 @@ flat in float v_ShadowBlur;
 flat in vec2  v_ShadowOffset;
 flat in vec4  v_ShadowColor;
 
+const int MAX_CLIP_DEPTH = 16;
+uniform vec2 u_resolution;
+uniform int u_clipCount;
+uniform vec4 u_clipRects[MAX_CLIP_DEPTH];
+uniform vec4 u_clipRadii[MAX_CLIP_DEPTH];
+
 const float EPSILON = 1e-5;
 
 float sdRoundBox( in vec2 p, in vec2 b, in vec4 r ) 
@@ -69,7 +75,7 @@ void main()
     vec2 b_outer = v_BoxSize * 0.5;
     vec2 p_outer = v_PosRelToCenter;
 
-    float aa = length(vec2(dFdx(p_outer.x), dFdy(p_outer.x)));
+    float aa = max(fwidth(p_outer.x), fwidth(p_outer.y));
 
     bool hasCornerRadii = any(greaterThan(abs(v_CornerRadii), vec4(EPSILON)));
     bool hasBorder = any(greaterThan(abs(v_BorderWidths), vec4(EPSILON)));
@@ -108,5 +114,20 @@ void main()
     elementColor.a *= alpha_outer;
 
     vec4 finalColor = mix(shadowLayer, elementColor, elementColor.a);
+
+    vec2 fragmentPosition = vec2(gl_FragCoord.x, u_resolution.y - gl_FragCoord.y);
+    for (int i = 0; i < MAX_CLIP_DEPTH; ++i)
+    {
+        if (i >= u_clipCount)
+            break;
+
+        vec4 rect = u_clipRects[i];
+        vec2 halfSize = rect.zw * 0.5;
+        vec2 relativePosition = fragmentPosition - rect.xy - halfSize;
+        float clipDistance = sdRoundBox(relativePosition, halfSize, u_clipRadii[i]);
+        float clipAA = max(fwidth(relativePosition.x), fwidth(relativePosition.y));
+        finalColor.a *= computeAlphaFromDistance(clipDistance, clipAA);
+    }
+
     FragColor = finalColor;
 }

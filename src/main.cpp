@@ -1,146 +1,106 @@
-// THIS FILE IS JUST A TEST/DEMO.
-// THIS IS NOT PART OF THE UI ENGINE
-// THIS FILE IS ONLY A DEMONSTRATION OF THE ENGINE's CAPABILITIES
-
-#include <UI/UIElements.h> //includes glad.h
+#include "demo_scenes.h"
 
 #include <GLFW/glfw3.h>
-#include <cmath>
 #include <iostream>
-#include <stdio.h>
+#include <string>
 
-std::array<float, 2> resolution{800.0f, 800.0f};
+namespace {
 
-const char *TITLE = "Index buffer testing";
+std::array<float, 2> resolution{1200.0f, 800.0f};
 
-void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
+void framebuffer_size_callback(GLFWwindow *, int width, int height) {
     glViewport(0, 0, width, height);
     resolution = {static_cast<float>(width), static_cast<float>(height)};
 }
 
-int main() {
-    glfwInit();
+void PrintUsage(const char *program) {
+    std::cout << "Usage: " << program << " [--scene debug|minimal]\n"
+              << "  debug     Run the original engine test scene\n"
+              << "  minimal   Run the minimal engine demo (default)\n";
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+    std::string sceneName = "minimal";
+    if (argc == 3 && std::string(argv[1]) == "--scene") {
+        sceneName = argv[2];
+    } else if (argc == 2 && std::string(argv[1]) == "--help") {
+        PrintUsage(argv[0]);
+        return 0;
+    } else if (argc != 1) {
+        PrintUsage(argv[0]);
+        return 1;
+    }
+
+    if (sceneName != "debug" && sceneName != "minimal") {
+        PrintUsage(argv[0]);
+        return 1;
+    }
+    if (sceneName == "debug") {
+        resolution = {800.0f, 800.0f};
+    }
+
+    if (glfwInit() != GLFW_TRUE) {
+        std::cerr << "Failed to initialize GLFW.\n";
+        return 1;
+    }
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow *window =
-        glfwCreateWindow(resolution[0], resolution[1], TITLE, NULL, NULL);
-    if (window == NULL) {
-        std::cout << "Failed to make GLFW window." << std::endl;
+    const std::string title = "UI Engine - " + sceneName;
+    GLFWwindow *window = glfwCreateWindow(static_cast<int>(resolution[0]),
+                                          static_cast<int>(resolution[1]),
+                                          title.c_str(), nullptr, nullptr);
+    if (window == nullptr) {
+        std::cerr << "Failed to create GLFW window.\n";
         glfwTerminate();
-        return -1;
+        return 1;
     }
 
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(0);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        std::cout << "Failed to initialize GLAD" << std::endl;
-        return -1;
+    if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
+        std::cerr << "Failed to initialize GLAD.\n";
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
     }
 
-    std::cout << "GPU Vendor: " << glGetString(GL_VENDOR) << std::endl;
-    std::cout << "GPU Renderer: " << glGetString(GL_RENDERER) << std::endl;
-    std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
+    std::cout << "GPU Vendor: " << glGetString(GL_VENDOR) << '\n'
+              << "GPU Renderer: " << glGetString(GL_RENDERER) << '\n'
+              << "OpenGL Version: " << glGetString(GL_VERSION) << '\n';
 
-    glViewport(0, 0, resolution[0], resolution[1]);
+    glViewport(0, 0, static_cast<int>(resolution[0]),
+               static_cast<int>(resolution[1]));
 
     UIScene uiScene;
     uiScene.Init();
-
-    auto root = uiScene.AddElement<UIRect>();
-    auto rect2 = uiScene.AddElement<UIRect>();
-    auto rect3 = uiScene.AddElement<UIRect>();
-    auto rect4 = uiScene.AddElement<UIRect>();
-    auto container2 = uiScene.AddElement<VerticalContainer>();
-    auto container = uiScene.AddElement<VerticalContainer>();
-    auto rect1 = uiScene.AddElement<UIRect>();
-    auto rect5 = uiScene.AddElement<UIRect>();
-
-    uiScene.SetRoot(root);
-    uiScene.AddChild(root, container);
-    uiScene.AddChild(root, container2);
-    uiScene.AddChild(container2, rect1);
-    uiScene.AddChild(container, rect2);
-    uiScene.AddChild(container2, rect3);
-    uiScene.AddChild(container, rect4);
-    uiScene.AddChild(root, rect5);
-
-    uiScene.EditElementShape(root, {0.0f, 0.0f, resolution[0], resolution[1]}, true);
-    uiScene.EditElementColor(root, {0.2f, 0.2f, 0.6f, 1.0f}, true);
-
-    uiScene.EditElementShape(rect5, {400.0f, 400.0f, 200.0f, 100.0f}, true);
-    uiScene.EditElementColor(rect5, {0.1f, 0.8f, 0.1f, 1.0f}, true);
-    uiScene.EditElementBorder(rect5, 2.0f, 2.0f, 2.0f, 2.0f, true);
-    uiScene.EditElementBorderColor(rect5, {1.0f, 1.0f, 1.0f, 1.0f}, true);
-    uiScene.EditElementCornerRadius(rect5, 20.0f, 20.0f, 20.0f, 2.0f, true);
-    uiScene.EditElementShadow(rect5, 10.0f, 5.0f, 5.0f, {0.0f, 0.0f, 0.0f, 0.4f},
-                              true);
-
-    uiScene.EditElementShape(container, {100.0f, 20.0f, 30.0f, 30.0f}, true);
-    uiScene.EditElementColor(container, {0.5f, 0.1f, 0.5f, 1.0f}, true);
-    uiScene.EditElementPadding(container, 0.0f, true);
-    uiScene.EditElementCornerRadius(container, 5.0f, 5.0f, 5.0f, 5.0f, true);
-    uiScene.EditElementBorder(container, 20.0f, 2.0f, 2.0f, 2.0f, true);
-    uiScene.EditElementBorderColor(container, {1.0f, 1.0f, 1.0f, 1.0f}, true);
-
-    uiScene.EditElementShape(container2, {180.0f, 40.0f, 10.0f, 20.0f}, true);
-    uiScene.EditElementColor(container2, {1.0f, 0.5f, 0.1f, 1.0f}, true);
-    uiScene.EditElementPadding(container2, 5.0f, true);
-
-    uiScene.EditElementShape(rect1, {0.0f, 0.0f, 60.0f, 40.0f}, true);
-    uiScene.EditElementColor(rect1, {0.3f, 1.0f, 0.4f, 1.0f}, true);
-    uiScene.EditElementCornerRadius(rect1, 20.0f, 20.0f, 20.0f, 20.0f, true);
-
-    uiScene.EditElementShape(rect2, {0.0f, 0.0f, 120.0f, 80.0f}, true);
-    uiScene.EditElementColor(rect2, {0.2f, 0.8f, 0.2f, 1.0f}, true);
-    uiScene.EditElementShadow(rect2, 5.0f, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f, 0.4f},
-                              true);
-
-    uiScene.EditElementShape(rect3, {0.0f, 0.0f, 40.0f, 60.0f}, true);
-    uiScene.EditElementColor(rect3, {0.2f, 0.4f, 1.0f, 1.0f}, true);
-
-    uiScene.EditElementShape(rect4, {0.0f, 0.0f, 90.0f, 90.0f}, true);
-    uiScene.EditElementColor(rect4, {1.0f, 0.8f, 0.2f, 1.0f}, true);
-
-    auto &c = uiScene.Get<VerticalContainer>(container);
-    auto &c2 = uiScene.Get<VerticalContainer>(container2);
-    c.centerHorizontally = true;
-    c.fitContentHeight = true;
-    c.fitContentWidth = true;
-    c.resizeChildren = true;
-    c.clipChildren = true;
-
-    c2.centerHorizontally = true;
-    c2.fitContentHeight = true;
-    c2.fitContentWidth = true;
-    c2.resizeChildren = false;
-    c2.clipChildren = true;
-
-    std::cout << "Size of ElementInstance: " << sizeof(ElementInstance) << " bytes"
-              << std::endl;
-    std::cout << "Size of CPU side struct: "
-              << sizeof(UIElement) + sizeof(StyleStoreState) +
-                     sizeof(GeometryStoreState)
-              << " bytes" << std::endl;
+    if (sceneName == "debug") {
+        BuildDebugScene(uiScene, resolution);
+    } else {
+        BuildMinimalScene(uiScene, resolution);
+    }
 
     double lastTime = glfwGetTime();
     int frameCount = 0;
-
     while (!glfwWindowShouldClose(window)) {
-        double currentTime = glfwGetTime();
-        frameCount++;
+        const double currentTime = glfwGetTime();
+        ++frameCount;
         if (currentTime - lastTime >= 1.0) {
-            std::string title = "UI Engine - " + std::to_string(frameCount) + " FPS";
-            glfwSetWindowTitle(window, title.c_str());
+            const std::string fpsTitle =
+                title + " - " + std::to_string(frameCount) + " FPS";
+            glfwSetWindowTitle(window, fpsTitle.c_str());
             frameCount = 0;
             lastTime = currentTime;
         }
 
         glfwPollEvents();
-        glClearColor(0.07f, 0.13f, 0.17f, 1.0f);
+        glClearColor(0.018f, 0.024f, 0.038f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
         uiScene.StepFrame(resolution);
@@ -149,6 +109,5 @@ int main() {
 
     glfwDestroyWindow(window);
     glfwTerminate();
-
     return 0;
 }
